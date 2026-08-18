@@ -4,7 +4,7 @@ from shapely.geometry import Point, box, mapping
 from datetime import date, timedelta
 
 def get_bounding_box_geojson(lat, lon, half_side_km=0.5):
-    """ Return a square bounding box in GeoJSON format around a point (lat, lon) with a given half side length in kilometers."""
+    """Return a square bounding box in GeoJSON format around a point (lat, lon) with a given half side length in kilometers."""
     half_side_m = half_side_km * 1000
 
     wgs84_point = gpd.GeoSeries([Point(lon, lat)], crs="EPSG:4326")
