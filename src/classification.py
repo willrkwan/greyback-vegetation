@@ -1,6 +1,7 @@
 
 import geopandas as gpd
-from shapely.geometry import Point, box, mapping
+import stackstac
+from shapely.geometry import Point, box, mapping, shape
 from datetime import date, timedelta
 
 def get_bounding_box_geojson(lat, lon, half_side_km=0.5):
@@ -43,3 +44,14 @@ def search_stac_items(catalog, collection_id, footprint, date_range, max_cloud=1
         query={"eo:cloud_cover": {"lt": max_cloud}},
         datetime=date_range,
     ).item_collection()
+
+def stack_items(items, footprint, bands, resolution=10, epsg=32611):
+    """Stack STAC items into a lazy xarray DataArray."""
+    footprint_geom = shape(footprint)
+    return stackstac.stack(
+        items,
+        assets=list(bands),
+        resolution=resolution,
+        bounds_latlon=footprint_geom.bounds,
+        epsg=epsg,
+    )
