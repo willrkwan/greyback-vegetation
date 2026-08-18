@@ -7,6 +7,12 @@ class ClassifiedRasterResult:
     raster: xr.DataArray
     ndvi: xr.DataArray
 
+@dataclass
+class ChangeRasterResult:
+    ndvi_diff: xr.DataArray
+    base_classified: ClassifiedRasterResult
+    target_classified: ClassifiedRasterResult
+
 @dataclass(frozen=True)
 class RasterConfig:
     catalog: pystac_client.Client

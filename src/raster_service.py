@@ -3,13 +3,14 @@ from .ingest import (
     get_season_date_ranges, 
     search_stac_items, 
     stack_items, 
-    build_landsat_cloud_mask
+    build_landsat_cloud_mask,
 )
 from .indices import compute_normalized_difference
 from .classification import classify_by_thresholds
 from .models import (
     ClassifiedRasterResult, 
     RasterConfig,
+    ChangeRasterResult,
 )
 
 
@@ -71,6 +72,11 @@ class RasterService:
         return ClassifiedRasterResult(raster=classified_raster, ndvi=ndvi)
 
 
-def build_change_raster(base_year, target_year):
-    """Get a change raster between two years for a given location."""
-    raise NotImplementedError("Change raster functionality is not yet implemented.")
+    def build_change_raster(self, base_year: int, target_year: int) -> ChangeRasterResult:
+        """Get a change raster between two years for a given location."""
+        base_result = self.build_classified_raster(base_year)
+        target_result = self.build_classified_raster(target_year)
+
+        ndvi_diff = target_result.ndvi - base_result.ndvi
+       
+        return ChangeRasterResult(ndvi_diff=ndvi_diff, base_classified=base_result, target_classified=target_result)
