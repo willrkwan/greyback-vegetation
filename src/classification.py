@@ -31,3 +31,15 @@ def get_season_date_ranges(years, season_start_month, season_start_day, duration
         end_dt = start_dt + timedelta(days=duration_days - 1)
         season_date_ranges[year] = f"{start_dt.isoformat()}/{end_dt.isoformat()}"
     return season_date_ranges
+
+def search_stac_items(catalog, collection_id, footprint, date_range, max_cloud=10):
+    """Search a STAC catalog for items matching a footprint, date range, and cloud threshold.
+
+    Returns a `pystac_client.ItemCollection`.
+    """
+    return catalog.search(
+        collections=[collection_id],
+        intersects=footprint,
+        query={"eo:cloud_cover": {"lt": max_cloud}},
+        datetime=date_range,
+    ).item_collection()
