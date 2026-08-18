@@ -1,5 +1,3 @@
-"""Classification helpers for turning continuous indices into discrete classes."""
-
 from __future__ import annotations
 
 from typing import Sequence
