@@ -63,3 +63,14 @@ def build_landsat_cloud_mask(raw_stack, qa_band="qa_pixel", cloud_bits=(1, 3, 4)
     for bit in cloud_bits:
         bitmask |= qa & (1 << bit)
     return bitmask == 0
+
+def temporal_composite(raw_stack, bands, mask=None, reducer="median", dim="time"):
+    """Select bands, optionally mask, and reduce by a specified reducer over time."""
+    subset = raw_stack.sel(band=list(bands))
+    if mask is not None:
+        subset = subset.where(mask)
+    if reducer == "median":
+        return subset.median(dim=dim)
+    if reducer == "mean":
+        return subset.mean(dim=dim)
+    raise ValueError(f"Unsupported reducer: {reducer}")
