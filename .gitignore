@@ -1,0 +1,16 @@
+# Virtual environment
+.venv/
+
+# Vs settings
+.vscode/
+
+# Notebook files and checkpoints
+notebooks/
+.ipynb_checkpoints/
+
+# Data directories
+data/raw/
+data/processed/
+
+# macOS
+.DS_Store

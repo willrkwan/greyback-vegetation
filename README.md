@@ -1,0 +1,11 @@
+V1
+
+Greyback Lake serves as the single high, headwaters reservoir for all water withdrawals made from Penticton Creek. Water quality and quantity are tied to forest cover. This project provides a historical analysis of vegetation change in a 5 km × 5 km region centered on Greyback Lake, across four time periods: 2013, 2014, 2017, and 2026. The project creates a generic data pipeline (get_classified_raster(year)) that ingests Landsat Collection 2 Level-2 tiles via STAC API against USGS, selecting scenes with optimal cloud cover metadata. The pipeline calculates the Normalized Difference Vegetation Index (NDVI) and classifies pixels into six land cover types: water, built-up, barren land, shrub and grassland, sparse vegetation, and dense vegetation. Class thresholds will use standard values, with attention to radiometric consistency across years. Change rasters highlight differences between the 2013 baseline and each comparison year (2014, 2017, 2026).
+
+The Streamlit app presents three columns: the left column displays the 2013 baseline raster, the center column shows change from 2013 to a user-selected year (via slider), and the right column displays the selected year's raster. Each column includes its classified NDVI raster and a table of land cover percentages (or percentage change for the center column).
+
+Classification is validated by comparing the 2026 raster against Harvested Areas of BC (Consolidated Cutblocks) data: vectorized dense vegetation polygons are compared against cutblock records (using PostGIS spatial intersection) with harvest dates ≤ 2026, calculating Producer's and User's accuracy. Dense vegetation is treated as forested; all other classes as non-forest.
+
+V2
+
+Employ a random forest classifier trained on labeled sample pixels to improve classification accuracy, and compare results against the NDVI threshold approach. Correlate time-series NDVI change against continuously tracked Greyback Lake water-level data to assess relationships between catchment forest cover and reservoir dynamics.
