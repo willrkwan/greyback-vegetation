@@ -1,8 +1,9 @@
 from datetime import date, timedelta
 
 import geopandas as gpd
-import stackstac
 from shapely.geometry import Point, box, mapping, shape
+
+import stackstac
 
 
 def get_bounding_box_geojson(lat, lon, half_side_km=0.5):
