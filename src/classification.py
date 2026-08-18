@@ -1,6 +1,7 @@
 
 import geopandas as gpd
 from shapely.geometry import Point, box, mapping
+from datetime import date, timedelta
 
 def get_bounding_box_geojson(lat, lon, half_side_km=0.5):
     half_side_m = half_side_km * 1000
@@ -20,3 +21,15 @@ def get_bounding_box_geojson(lat, lon, half_side_km=0.5):
     # Reproject back to WGS84 and return GeoJSON geometry
     bbox_wgs84 = gpd.GeoSeries([bbox_m], crs="EPSG:3857").to_crs(epsg=4326).iloc[0]
     return mapping(bbox_wgs84)
+
+def get_season_date_ranges(years, season_start_month, season_start_day, duration_days):
+    """Return {year: 'YYYY-MM-DD/YYYY-MM-DD'} for one year or an iterable of years."""
+    if isinstance(years, int):
+        years = [years]
+
+    season_date_ranges = {}
+    for year in years:
+        start_dt = date(year, season_start_month, season_start_day)
+        end_dt = start_dt + timedelta(days=duration_days - 1)
+        season_date_ranges[year] = f"{start_dt.isoformat()}/{end_dt.isoformat()}"
+    return season_date_ranges
