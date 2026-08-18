@@ -19,7 +19,7 @@ class RasterService:
         self.config = config
 
     def build_classified_raster(self, year: int) -> ClassifiedRasterResult:
-        """Get a classified raster and its index for a given year and location."""
+        """Get a classified raster and its index for a given year."""
         footprint = get_bounding_box_geojson(
             self.config.center_lat, 
             self.config.center_lon, 
@@ -73,7 +73,7 @@ class RasterService:
 
 
     def build_change_raster(self, base_year: int, target_year: int) -> ChangeRasterResult:
-        """Get a change raster between two years for a given location."""
+        """Get a change raster comparing NDVI between two years, and each year's classified raster and index."""
         base_result = self.build_classified_raster(base_year)
         target_result = self.build_classified_raster(target_year)
 
