@@ -7,46 +7,69 @@ from .ingest import (
 )
 from .indices import compute_normalized_difference
 from .classification import classify_by_thresholds
-from .models import ClassifiedRasterResult
+from .models import (
+    ClassifiedRasterResult, 
+    RasterConfig,
+)
 
-def build_classified_raster(
-    year: int,
-    *,
-    catalog,
-    collection_id: str,
-    center_lat: float,
-    center_lon: float,
-    half_side_km: float = 5.0,
-    season_start_month: int = 7,
-    season_start_day: int = 1,
-    duration_days: int = 31,
-    max_cloud: float = 10,
-    resolution: int = 30,
-    epsg: int = 32611,
-    ndvi_num_band: str = "nir08",
-    ndvi_den_band: str = "red",
-    qa_band: str = "qa_pixel",
-    cloud_bits: tuple[int, ...] = (1, 3, 4),
-    reducer: str = "median",
-    thresholds: tuple[float, ...] = (-0.05, 0.10, 0.20, 0.35, 0.50),
-    class_values: tuple[int, ...] = (0, 1, 2, 3, 4, 5),
-    compute: bool = True,
-) -> ClassifiedRasterResult:
-    """Get a classified raster and its index for a given year and location."""
-    footprint = get_bounding_box_geojson(center_lat, center_lon, half_side_km)
-    date_range = get_season_date_ranges(year, season_start_month, season_start_day, duration_days)[year]
 
-    items = search_stac_items(catalog, collection_id, footprint, date_range, max_cloud)
+class RasterService:
+    def __init__(self, config: RasterConfig):
+        self.config = config
 
-    data = stack_items(items, footprint, bands=[ndvi_num_band, ndvi_den_band, qa_band], resolution=resolution, epsg=epsg)
+    def build_classified_raster(self, year: int) -> ClassifiedRasterResult:
+        """Get a classified raster and its index for a given year and location."""
+        footprint = get_bounding_box_geojson(
+            self.config.center_lat, 
+            self.config.center_lon, 
+            self.config.half_side_km
+        )
+        date_range = get_season_date_ranges(
+            year, 
+            self.config.season_start_month, 
+            self.config.season_start_day, 
+            self.config.duration_days
+        )[year]
 
-    cloud_mask = build_landsat_cloud_mask(data, qa_band=qa_band, cloud_bits=cloud_bits)
+        items = search_stac_items(
+            self.config.catalog, 
+            self.config.collection_id, 
+            footprint, 
+            date_range, 
+            self.config.max_cloud
+        )
 
-    ndvi_index = compute_normalized_difference(data, num_band=ndvi_num_band, den_band=ndvi_den_band, mask=cloud_mask, reducer=reducer, compute=compute)
+        data = stack_items(
+            items, 
+            footprint, 
+            bands=[self.config.ndvi_num_band, self.config.ndvi_den_band, self.config.qa_band], 
+            resolution=self.config.resolution, 
+            epsg=self.config.epsg
+        )
 
-    classified_raster = classify_by_thresholds(ndvi_index, thresholds=thresholds, class_values=class_values)
+        cloud_mask = build_landsat_cloud_mask(
+            data, 
+            qa_band=self.config.qa_band, 
+            cloud_bits=self.config.cloud_bits
+        )
 
-    return classified_raster, ndvi_index
+        ndvi = compute_normalized_difference(
+            data, 
+            num_band=self.config.ndvi_num_band, 
+            den_band=self.config.ndvi_den_band, 
+            mask=cloud_mask, 
+            reducer=self.config.reducer, 
+            compute=self.config.compute
+        )
+
+        classified_raster = classify_by_thresholds(
+            ndvi, 
+            thresholds=self.config.thresholds, 
+            class_values=self.config.class_values
+        )
+
+        return ClassifiedRasterResult(raster=classified_raster, ndvi=ndvi)
+
 
 def build_change_raster(base_year, target_year):
     """Get a change raster between two years for a given location."""
