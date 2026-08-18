@@ -55,3 +55,11 @@ def stack_items(items, footprint, bands, resolution=10, epsg=32611):
         bounds_latlon=footprint_geom.bounds,
         epsg=epsg,
     )
+
+def build_landsat_cloud_mask(raw_stack, qa_band="qa_pixel", cloud_bits=(1, 3, 4)):
+    """Create a boolean mask where True means clear-sky pixel."""
+    qa = raw_stack.sel(band=qa_band).astype("uint16")
+    bitmask = 0
+    for bit in cloud_bits:
+        bitmask |= qa & (1 << bit)
+    return bitmask == 0
