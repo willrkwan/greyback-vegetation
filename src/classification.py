@@ -93,3 +93,37 @@ def compute_normalized_difference(raw_stack, num_band, den_band, mask=None, redu
         raise ValueError(f"Unsupported reducer: {reducer}")
 
     return index.compute() if compute else index
+
+def percentile_stretch(image, low_q=0.02, high_q=0.98, clip_range=(0, 1), compute=True):
+    """Apply percentile contrast stretch for visualization."""
+    low = image.quantile(low_q)
+    high = image.quantile(high_q)
+    stretched = (image - low) / (high - low)
+    stretched = stretched.clip(*clip_range)
+    return stretched.compute() if compute else stretched
+
+def get_rgb_composite(
+    catalog,
+    date_range,
+    footprint,
+    collection_id="landsat-c2-l2",
+    rgb_bands=("red", "green", "blue"),
+    qa_band="qa_pixel",
+    max_cloud=10,
+    resolution=10,
+    epsg=32611,
+    reducer="median",
+    low_q=0.02,
+    high_q=0.98,
+    compute=True,
+):
+    """Fetch imagery and return a stretched RGB composite."""
+    items = search_stac_items(catalog, collection_id, footprint, date_range, max_cloud=max_cloud)
+    if len(items) == 0:
+        return None
+
+    required_bands = tuple(rgb_bands) + (qa_band,)
+    raw = stack_items(items, footprint, required_bands, resolution=resolution, epsg=epsg)
+    cloud_mask = build_landsat_cloud_mask(raw, qa_band=qa_band)
+    rgb = temporal_composite(raw, rgb_bands, mask=cloud_mask, reducer=reducer)
+    return percentile_stretch(rgb, low_q=low_q, high_q=high_q, compute=compute)
