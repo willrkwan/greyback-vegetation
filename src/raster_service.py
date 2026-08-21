@@ -14,6 +14,18 @@ from .models import (
 )
 
 
+class RasterServiceError(RuntimeError):
+    """Base class for raster service data availability errors."""
+
+
+class NoScenesFoundError(RasterServiceError):
+    """Raised when a selected year has no matching STAC scenes."""
+
+
+class NoClearPixelsError(RasterServiceError):
+    """Raised when cloud masking removes all pixels for a given scene set."""
+
+
 class RasterService:
     def __init__(self, config: RasterConfig):
         self.config = config
@@ -39,6 +51,11 @@ class RasterService:
             date_range, 
             self.config.max_cloud
         )
+        if not items:
+            raise NoScenesFoundError(
+                f"No STAC scenes found for year {year} in the selected seasonal window. "
+                "Try a different year or a wider date range."
+            )
 
         data = stack_items(
             items, 
@@ -53,6 +70,11 @@ class RasterService:
             qa_band=self.config.qa_band, 
             cloud_bits=self.config.cloud_bits
         )
+        if cloud_mask is None or not bool(cloud_mask.any()):
+            raise NoClearPixelsError(
+                f"No usable clear-sky pixels remained for year {year} after masking. "
+                "Try a higher cloud threshold or a different season."
+            )
 
         ndvi = compute_normalized_difference(
             data, 
@@ -62,6 +84,10 @@ class RasterService:
             reducer=self.config.reducer, 
             compute=self.config.compute
         )
+        if ndvi is None or ndvi.size == 0:
+            raise NoClearPixelsError(
+                f"The NDVI result for year {year} contained no valid pixels after filtering."
+            )
 
         classified_raster = classify_by_thresholds(
             ndvi, 

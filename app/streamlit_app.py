@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.models import RasterConfig
-from src.raster_service import RasterService
+from src.raster_service import NoClearPixelsError, NoScenesFoundError, RasterService
 
 
 @st.cache_resource
@@ -110,10 +110,22 @@ def main():
     baseline_year = st.slider("Baseline year", min_value=2013, max_value=2025, value=2013, step=1)
     comparison_year = st.slider("Comparison year", min_value=2013, max_value=2025, value=2024, step=1)
 
-    with st.spinner("Loading raster data..."):
-        baseline = service.build_classified_raster(baseline_year)
-        comparison = service.build_classified_raster(comparison_year)
-        change = service.build_change_raster(baseline_year, comparison_year)
+    try:
+        with st.spinner("Loading raster data..."):
+            baseline = service.build_classified_raster(baseline_year)
+            comparison = service.build_classified_raster(comparison_year)
+            change = service.build_change_raster(baseline_year, comparison_year)
+    except NoScenesFoundError as exc:
+        st.warning(str(exc))
+        st.info("Try another year or widen the seasonal window for this location.")
+        return
+    except NoClearPixelsError as exc:
+        st.warning(str(exc))
+        st.info("Consider increasing the cloud threshold or selecting a different year.")
+        return
+    except Exception as exc:  # pragma: no cover - fallback for unexpected runtime issues
+        st.error(f"Unexpected processing error: {exc}")
+        return
 
     col1, col2, col3 = st.columns(3)
 
