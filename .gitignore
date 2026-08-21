@@ -1,19 +1,38 @@
-# Virtual environment
+# Python environment
 .venv/
 
-# Vs settings
-.vscode/
+# AI/ML model artifacts
+.agents/
+.claude/
 
-# Notebook files and checkpoints
-notebooks/
+# Editor / local tooling
+.vscode/
+.idea/
+
+# Jupyter
 .ipynb_checkpoints/
 
 # Data directories
 data/raw/
 data/processed/
 
-# macOS
+# OS files
 .DS_Store
 
-# Python cache
+# Python caches / artifacts
 __pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Matplotlib / Streamlit local state
+.matplotlib_cache/
+.streamlit/
+
+
+# Jupyter notebooks
+notebooks/
