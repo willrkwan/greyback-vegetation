@@ -86,8 +86,8 @@ def load_service(
     return RasterService(config)
 
 
-def render_array(array, title, mode="continuous"):
-    fig, ax = plt.subplots(figsize=(8, 6))
+def render_array(array, title, mode="continuous", figsize=(8, 6), show_class_legend=True):
+    fig, ax = plt.subplots(figsize=figsize)
 
     if mode == "classified":
         colors = [
@@ -115,12 +115,13 @@ def render_array(array, title, mode="continuous"):
             Patch(facecolor=color, label=f"{idx}: {name}")
             for idx, (color, name) in enumerate(zip(colors, class_names))
         ]
-        ax.legend(
-            handles=legend_elements,
-            title="Vegetation class",
-            loc="upper left",
-            bbox_to_anchor=(1.02, 1),
-        )
+        if show_class_legend:
+            ax.legend(
+                handles=legend_elements,
+                title="Vegetation class",
+                loc="upper left",
+                bbox_to_anchor=(1.02, 1),
+            )
 
     else:
         ndvi_cmap = LinearSegmentedColormap.from_list(
@@ -137,8 +138,8 @@ def render_array(array, title, mode="continuous"):
     return fig
 
 
-def render_rgb_array(array, title):
-    fig, ax = plt.subplots(figsize=(8, 6))
+def render_rgb_array(array, title, figsize=(8, 6)):
+    fig, ax = plt.subplots(figsize=figsize)
 
     values = np.asarray(array.values, dtype=float)
     if values.ndim != 3:
@@ -250,7 +251,8 @@ def format_scene_stamp(scene_meta):
     acquired = scene_meta.get("acquired_at")
     if not acquired:
         return "unknown acquisition"
-    return acquired.split("T")[0]
+    text = str(acquired).replace("T", " ")
+    return text.split(" ")[0]
 
 
 @st.cache_data(ttl=600)
@@ -623,8 +625,16 @@ def main():
 
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.subheader(f"{view_selection.baseline_year} NDVI ({baseline_stamp})")
-            st.pyplot(render_array(baseline_ndvi, f"{view_selection.baseline_year} NDVI | {baseline_stamp}", mode="ndvi"))
+            st.subheader(f"Baseline NDVI: {view_selection.baseline_year}")
+            st.caption(f"Acquired: {baseline_stamp}")
+            st.pyplot(
+                render_array(
+                    baseline_ndvi,
+                    f"{view_selection.baseline_year} NDVI | {baseline_stamp}",
+                    mode="ndvi",
+                    figsize=(5.5, 5.5),
+                )
+            )
         with col2:
             st.subheader("NDVI change")
             st.pyplot(
@@ -632,11 +642,20 @@ def main():
                     ndvi_diff,
                     f"{view_selection.baseline_year} to {view_selection.comparison_year} NDVI change",
                     mode="continuous",
+                    figsize=(5.5, 5.5),
                 )
             )
         with col3:
-            st.subheader(f"{view_selection.comparison_year} NDVI ({comparison_stamp})")
-            st.pyplot(render_array(comparison_ndvi, f"{view_selection.comparison_year} NDVI | {comparison_stamp}", mode="ndvi"))
+            st.subheader(f"Comparison NDVI: {view_selection.comparison_year}")
+            st.caption(f"Acquired: {comparison_stamp}")
+            st.pyplot(
+                render_array(
+                    comparison_ndvi,
+                    f"{view_selection.comparison_year} NDVI | {comparison_stamp}",
+                    mode="ndvi",
+                    figsize=(5.5, 5.5),
+                )
+            )
         return
 
     if view_selection.mode == "Compare years" and scene_selection.output_mode == "RGB":
@@ -651,11 +670,13 @@ def main():
         )
         col1, col2 = st.columns(2)
         with col1:
-            st.subheader(f"{view_selection.baseline_year} RGB ({baseline_stamp})")
-            st.pyplot(render_rgb_array(baseline_rgb, f"{view_selection.baseline_year} RGB | {baseline_stamp}"))
+            st.subheader(f"Baseline RGB: {view_selection.baseline_year}")
+            st.caption(f"Acquired: {baseline_stamp}")
+            st.pyplot(render_rgb_array(baseline_rgb, f"{view_selection.baseline_year} RGB | {baseline_stamp}", figsize=(6, 5.5)))
         with col2:
-            st.subheader(f"{view_selection.comparison_year} RGB ({comparison_stamp})")
-            st.pyplot(render_rgb_array(comparison_rgb, f"{view_selection.comparison_year} RGB | {comparison_stamp}"))
+            st.subheader(f"Comparison RGB: {view_selection.comparison_year}")
+            st.caption(f"Acquired: {comparison_stamp}")
+            st.pyplot(render_rgb_array(comparison_rgb, f"{view_selection.comparison_year} RGB | {comparison_stamp}", figsize=(6, 5.5)))
         return
 
     baseline_summary = summarize_class_distribution(baseline.raster)
@@ -678,12 +699,15 @@ def main():
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        st.subheader(f"{view_selection.baseline_year} classified raster ({baseline_stamp})")
+        st.subheader(f"Baseline classified map: {view_selection.baseline_year}")
+        st.caption(f"Acquired: {baseline_stamp}")
         st.pyplot(
             render_array(
                 baseline.raster,
                 f"{view_selection.baseline_year} classification | {baseline_stamp}",
                 mode="classified",
+                figsize=(5.5, 5.5),
+                show_class_legend=False,
             )
         )
 
@@ -694,17 +718,26 @@ def main():
                 change.ndvi_diff,
                 f"{view_selection.baseline_year} to {view_selection.comparison_year} change",
                 mode="continuous",
+                figsize=(5.5, 5.5),
             )
         )
 
     with col3:
-        st.subheader(f"{view_selection.comparison_year} classified raster ({comparison_stamp})")
+        st.subheader(f"Comparison classified map: {view_selection.comparison_year}")
+        st.caption(f"Acquired: {comparison_stamp}")
         st.pyplot(
             render_array(
                 comparison.raster,
                 f"{view_selection.comparison_year} classification | {comparison_stamp}",
                 mode="classified",
+                figsize=(5.5, 5.5),
+                show_class_legend=False,
             )
+        )
+
+    with st.expander("Show vegetation class legend"):
+        st.markdown(
+            "0: Water / very low vegetation  \\n+1: Bare / sparse vegetation  \\n+2: Low vegetation  \\n+3: Moderate vegetation  \\n+4: High vegetation  \\n+5: Very high vegetation"
         )
 
     st.caption("Values are derived from the raster service pipeline for the selected scenes and seasonal settings.")
