@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Optional
 
 import pystac_client
 import xarray as xr
@@ -13,6 +14,16 @@ class ChangeRasterResult:
     ndvi_diff: xr.DataArray
     base_classified: ClassifiedRasterResult
     target_classified: ClassifiedRasterResult
+
+
+@dataclass(frozen=True)
+class SceneSummary:
+    scene_id: str
+    acquired_at: str
+    cloud_cover: Optional[float]
+    platform: Optional[str]
+    has_ndvi_bands: bool
+    has_rgb_bands: bool
 
 @dataclass(frozen=True)
 class RasterConfig:
@@ -35,6 +46,8 @@ class RasterConfig:
 
     ndvi_num_band: str = "nir08"
     ndvi_den_band: str = "red"
+    green_band: str = "green"
+    blue_band: str = "blue"
     qa_band: str = "qa_pixel"
     cloud_bits: tuple[int, ...] = (1, 3, 4)
 

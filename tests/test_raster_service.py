@@ -6,6 +6,7 @@ import xarray as xr
 
 from src import raster_service
 from src.models import ChangeRasterResult, ClassifiedRasterResult, RasterConfig
+from src.raster_service import NoClearPixelsError, NoScenesFoundError
 
 
 def make_config() -> RasterConfig:
@@ -68,6 +69,31 @@ class TestRasterService(unittest.TestCase):
         self.assertIs(result.base_classified, base_result)
         self.assertIs(result.target_classified, target_result)
         np.testing.assert_allclose(result.ndvi_diff.values, target_ndvi.values - base_ndvi.values)
+
+    def test_build_classified_raster_raises_when_no_scenes(self):
+        service = raster_service.RasterService(make_config())
+
+        with (
+            patch.object(raster_service, "get_bounding_box_geojson", return_value={"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]}),
+            patch.object(raster_service, "get_season_date_ranges", return_value={2023: "2023-07-01/2023-07-31"}),
+            patch.object(raster_service, "search_stac_items", return_value=[]),
+        ):
+            with self.assertRaises(NoScenesFoundError):
+                service.build_classified_raster(2023)
+
+    def test_build_classified_raster_raises_when_no_clear_pixels(self):
+        service = raster_service.RasterService(make_config())
+        data = object()
+
+        with (
+            patch.object(raster_service, "get_bounding_box_geojson", return_value={"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]}),
+            patch.object(raster_service, "get_season_date_ranges", return_value={2023: "2023-07-01/2023-07-31"}),
+            patch.object(raster_service, "search_stac_items", return_value=[object()]),
+            patch.object(raster_service, "stack_items", return_value=data),
+            patch.object(raster_service, "build_landsat_cloud_mask", return_value=xr.DataArray(np.zeros((2, 2), dtype=bool), dims=("y", "x"))),
+        ):
+            with self.assertRaises(NoClearPixelsError):
+                service.build_classified_raster(2023)
 
 
 if __name__ == "__main__":
