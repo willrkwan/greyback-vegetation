@@ -29,8 +29,10 @@ def get_catalog():
         modifier=sign_inplace,
     )
 
+
 YEAR_MIN = 2013
 YEAR_MAX = 2025
+
 
 @dataclass(frozen=True)
 class ViewSelection:
@@ -46,13 +48,6 @@ class AnalysisSettings:
     season_start_day: int
     duration_days: int
     max_cloud: float
-
-
-@dataclass(frozen=True)
-class SceneSelection:
-    baseline_scene_id: str
-    comparison_scene_id: Optional[str]
-    output_mode: str
 
 
 @st.cache_resource
@@ -109,20 +104,19 @@ def render_array(array, title, mode="continuous", figsize=(8, 6), show_class_leg
 
         discrete_cmap = ListedColormap(colors)
         norm = BoundaryNorm(np.arange(-0.5, 6.5, 1), discrete_cmap.N)
-        img = ax.imshow(array.values, cmap=discrete_cmap, norm=norm)
+        ax.imshow(array.values, cmap=discrete_cmap, norm=norm)
 
-        legend_elements = [
-            Patch(facecolor=color, label=f"{idx}: {name}")
-            for idx, (color, name) in enumerate(zip(colors, class_names))
-        ]
         if show_class_legend:
+            legend_elements = [
+                Patch(facecolor=color, label=f"{idx}: {name}")
+                for idx, (color, name) in enumerate(zip(colors, class_names))
+            ]
             ax.legend(
                 handles=legend_elements,
                 title="Vegetation class",
                 loc="upper left",
                 bbox_to_anchor=(1.02, 1),
             )
-
     else:
         ndvi_cmap = LinearSegmentedColormap.from_list(
             "ndvi_change",
@@ -247,14 +241,6 @@ def format_season_window(year, settings):
     return f"{start_dt.isoformat()} to {end_dt.isoformat()}"
 
 
-def format_scene_stamp(scene_meta):
-    acquired = scene_meta.get("acquired_at")
-    if not acquired:
-        return "unknown acquisition"
-    text = str(acquired).replace("T", " ")
-    return text.split(" ")[0]
-
-
 @st.cache_data(ttl=600)
 def get_scene_rows(year, season_start_month, season_start_day, duration_days, max_cloud):
     service = load_service(
@@ -279,16 +265,10 @@ def get_scene_rows(year, season_start_month, season_start_day, duration_days, ma
     return rows
 
 
-def format_scene_options(scene_rows):
-    options = []
-    labels = {}
-    for row in scene_rows:
-        cloud_value = row["cloud_cover"]
-        cloud_text = "N/A" if cloud_value is None else f"{cloud_value:.1f}%"
-        label = f"{row['acquired_at']} | Cloud {cloud_text} | {row['scene_id']}"
-        options.append(row["scene_id"])
-        labels[row["scene_id"]] = label
-    return options, labels
+def filter_scene_rows_for_output(scene_rows, output_mode):
+    if output_mode in {"Classified", "NDVI", "Classified + change", "NDVI + change"}:
+        return [row for row in scene_rows if row["has_ndvi_bands"]]
+    return [row for row in scene_rows if row["has_rgb_bands"]]
 
 
 def render_scene_availability_table(title, scene_rows):
@@ -377,45 +357,19 @@ def get_user_inputs():
     return selection, settings
 
 
-def get_scene_selection(view_selection, baseline_scene_rows, comparison_scene_rows):
-    st.subheader("Scene selection")
-    st.caption("Select specific scenes after reviewing availability metadata.")
-
-    baseline_options, baseline_labels = format_scene_options(baseline_scene_rows)
-    baseline_scene_id = st.selectbox(
-        "Baseline scene",
-        options=baseline_options,
-        format_func=lambda scene_id: baseline_labels[scene_id],
-    )
-
+def get_output_mode_config(view_selection):
     if view_selection.mode == "Single year":
-        output_mode = st.segmented_control(
-            "Output",
-            options=["Classified", "NDVI", "RGB"],
-            default="Classified",
-        )
-        return SceneSelection(
-            baseline_scene_id=baseline_scene_id,
-            comparison_scene_id=None,
-            output_mode=output_mode,
-        )
+        return ["Classified", "NDVI", "RGB"], "Classified"
+    return ["Classified + change", "NDVI + change", "RGB"], "Classified + change"
 
-    comparison_options, comparison_labels = format_scene_options(comparison_scene_rows)
-    comparison_scene_id = st.selectbox(
-        "Comparison scene",
-        options=comparison_options,
-        format_func=lambda scene_id: comparison_labels[scene_id],
-    )
-    output_mode = st.segmented_control(
-        "Output",
-        options=["Classified + change", "NDVI + change", "RGB"],
-        default="Classified + change",
-    )
-    return SceneSelection(
-        baseline_scene_id=baseline_scene_id,
-        comparison_scene_id=comparison_scene_id,
-        output_mode=output_mode,
-    )
+
+def get_output_mode_from_state(view_selection):
+    options, default = get_output_mode_config(view_selection)
+    current = st.session_state.get("composite_output_mode", default)
+    if current not in options:
+        current = default
+        st.session_state["composite_output_mode"] = default
+    return current, options, default
 
 
 def main():
@@ -471,89 +425,60 @@ def main():
             st.info("Try a wider season window or increase the cloud filter.")
             return
 
-    st.subheader("Scene availability")
-    render_scene_availability_table(f"{view_selection.baseline_year} candidate scenes", baseline_scene_rows)
+    output_mode, output_options, output_default = get_output_mode_from_state(view_selection)
+
+    baseline_used_rows = filter_scene_rows_for_output(baseline_scene_rows, output_mode)
+    if not baseline_used_rows:
+        st.warning("No baseline scenes are eligible for the selected composite output.")
+        st.info("Try another output mode or loosen the cloud and season filters.")
+        return
+
+    comparison_used_rows = []
     if view_selection.mode == "Compare years":
-        render_scene_availability_table(f"{view_selection.comparison_year} candidate scenes", comparison_scene_rows)
+        comparison_used_rows = filter_scene_rows_for_output(comparison_scene_rows, output_mode)
+        if not comparison_used_rows:
+            st.warning("No comparison scenes are eligible for the selected composite output.")
+            st.info("Try another output mode or loosen the cloud and season filters.")
+            return
 
-    scene_selection = get_scene_selection(view_selection, baseline_scene_rows, comparison_scene_rows)
-
-    baseline_scene_meta = {
-        row["scene_id"]: row for row in baseline_scene_rows
-    }[scene_selection.baseline_scene_id]
-    comparison_scene_meta = None
+    st.subheader("Eligible scenes used in composite")
+    render_scene_availability_table(f"{view_selection.baseline_year} scenes used", baseline_used_rows)
     if view_selection.mode == "Compare years":
-        comparison_scene_meta = {
-            row["scene_id"]: row for row in comparison_scene_rows
-        }[scene_selection.comparison_scene_id]
+        render_scene_availability_table(f"{view_selection.comparison_year} scenes used", comparison_used_rows)
 
-    if scene_selection.output_mode in {"Classified", "NDVI", "Classified + change", "NDVI + change"}:
-        if not baseline_scene_meta["has_ndvi_bands"]:
-            st.warning("The selected baseline scene does not include all NDVI bands.")
-            return
-        if comparison_scene_meta is not None and not comparison_scene_meta["has_ndvi_bands"]:
-            st.warning("The selected comparison scene does not include all NDVI bands.")
-            return
-
-    if scene_selection.output_mode == "RGB":
-        if not baseline_scene_meta["has_rgb_bands"]:
-            st.warning("The selected baseline scene does not include all RGB bands.")
-            return
-        if comparison_scene_meta is not None and not comparison_scene_meta["has_rgb_bands"]:
-            st.warning("The selected comparison scene does not include all RGB bands.")
-            return
+    st.subheader("Output")
+    selected_mode = st.segmented_control(
+        "Composite output",
+        options=output_options,
+        default=output_default,
+        key="composite_output_mode",
+    )
+    if selected_mode != output_mode:
+        st.rerun()
+    output_mode = selected_mode
 
     try:
-        with st.spinner("Loading output for selected scenes..."):
-            if view_selection.mode == "Single year" and scene_selection.output_mode == "Classified":
-                baseline = service.build_classified_raster(
-                    view_selection.selected_year,
-                    scene_id=scene_selection.baseline_scene_id,
-                )
-            elif view_selection.mode == "Single year" and scene_selection.output_mode == "NDVI":
-                baseline_ndvi = service.build_ndvi_raster(
-                    view_selection.selected_year,
-                    scene_id=scene_selection.baseline_scene_id,
-                )
-            elif view_selection.mode == "Single year" and scene_selection.output_mode == "RGB":
-                baseline_rgb = service.build_rgb_raster(
-                    view_selection.selected_year,
-                    scene_id=scene_selection.baseline_scene_id,
-                )
-            elif view_selection.mode == "Compare years" and scene_selection.output_mode == "Classified + change":
-                baseline = service.build_classified_raster(
-                    view_selection.baseline_year,
-                    scene_id=scene_selection.baseline_scene_id,
-                )
-                comparison = service.build_classified_raster(
-                    view_selection.comparison_year,
-                    scene_id=scene_selection.comparison_scene_id,
-                )
+        with st.spinner("Loading composite output from eligible scenes..."):
+            if view_selection.mode == "Single year" and output_mode == "Classified":
+                baseline = service.build_classified_raster(view_selection.selected_year)
+            elif view_selection.mode == "Single year" and output_mode == "NDVI":
+                baseline_ndvi = service.build_ndvi_raster(view_selection.selected_year)
+            elif view_selection.mode == "Single year" and output_mode == "RGB":
+                baseline_rgb = service.build_rgb_raster(view_selection.selected_year)
+            elif view_selection.mode == "Compare years" and output_mode == "Classified + change":
                 change = service.build_change_raster(
                     view_selection.baseline_year,
                     view_selection.comparison_year,
-                    base_scene_id=scene_selection.baseline_scene_id,
-                    target_scene_id=scene_selection.comparison_scene_id,
                 )
-            elif view_selection.mode == "Compare years" and scene_selection.output_mode == "NDVI + change":
-                baseline_ndvi = service.build_ndvi_raster(
-                    view_selection.baseline_year,
-                    scene_id=scene_selection.baseline_scene_id,
-                )
-                comparison_ndvi = service.build_ndvi_raster(
-                    view_selection.comparison_year,
-                    scene_id=scene_selection.comparison_scene_id,
-                )
+                baseline = change.base_classified
+                comparison = change.target_classified
+            elif view_selection.mode == "Compare years" and output_mode == "NDVI + change":
+                baseline_ndvi = service.build_ndvi_raster(view_selection.baseline_year)
+                comparison_ndvi = service.build_ndvi_raster(view_selection.comparison_year)
                 ndvi_diff = comparison_ndvi - baseline_ndvi
             else:
-                baseline_rgb = service.build_rgb_raster(
-                    view_selection.baseline_year,
-                    scene_id=scene_selection.baseline_scene_id,
-                )
-                comparison_rgb = service.build_rgb_raster(
-                    view_selection.comparison_year,
-                    scene_id=scene_selection.comparison_scene_id,
-                )
+                baseline_rgb = service.build_rgb_raster(view_selection.baseline_year)
+                comparison_rgb = service.build_rgb_raster(view_selection.comparison_year)
     except NoScenesFoundError as exc:
         st.warning(str(exc))
         st.info("Try another year, widen the seasonal window, or loosen the cloud filter.")
@@ -566,11 +491,13 @@ def main():
         st.error(f"Unexpected processing error: {exc}")
         return
 
-    if view_selection.mode == "Single year" and scene_selection.output_mode == "Classified":
+    if view_selection.mode == "Single year" and output_mode == "Classified":
         season_text = format_season_window(view_selection.selected_year, analysis_settings)
-        scene_stamp = format_scene_stamp(baseline_scene_meta)
-        st.subheader(f"{view_selection.selected_year} classified NDVI ({scene_stamp})")
-        st.caption(f"Season window: {season_text}")
+        st.subheader(f"{view_selection.selected_year} classified NDVI composite")
+        st.caption(
+            f"Seasonal window: {season_text} | "
+            f"Eligible scenes used in composite: {len(baseline_used_rows)}"
+        )
 
         class_summary = summarize_class_distribution(baseline.raster)
         st.dataframe(build_class_distribution_rows(class_summary), width="stretch", hide_index=True)
@@ -578,59 +505,63 @@ def main():
         st.pyplot(
             render_array(
                 baseline.raster,
-                f"{view_selection.selected_year} classification | {scene_stamp}",
+                f"{view_selection.selected_year} classified seasonal composite",
                 mode="classified",
             )
         )
         return
 
-    if view_selection.mode == "Single year" and scene_selection.output_mode == "NDVI":
+    if view_selection.mode == "Single year" and output_mode == "NDVI":
         season_text = format_season_window(view_selection.selected_year, analysis_settings)
-        scene_stamp = format_scene_stamp(baseline_scene_meta)
-        st.subheader(f"{view_selection.selected_year} NDVI ({scene_stamp})")
-        st.caption(f"Season window: {season_text}")
+        st.subheader(f"{view_selection.selected_year} NDVI composite")
+        st.caption(
+            f"Seasonal window: {season_text} | "
+            f"Eligible scenes used in composite: {len(baseline_used_rows)}"
+        )
         st.pyplot(
             render_array(
                 baseline_ndvi,
-                f"{view_selection.selected_year} NDVI | {scene_stamp}",
+                f"{view_selection.selected_year} NDVI seasonal composite",
                 mode="ndvi",
             )
         )
         return
 
-    if view_selection.mode == "Single year" and scene_selection.output_mode == "RGB":
+    if view_selection.mode == "Single year" and output_mode == "RGB":
         season_text = format_season_window(view_selection.selected_year, analysis_settings)
-        scene_stamp = format_scene_stamp(baseline_scene_meta)
-        st.subheader(f"{view_selection.selected_year} RGB ({scene_stamp})")
-        st.caption(f"Season window: {season_text}")
+        st.subheader(f"{view_selection.selected_year} RGB composite")
+        st.caption(
+            f"Seasonal window: {season_text} | "
+            f"Eligible scenes used in composite: {len(baseline_used_rows)}"
+        )
         st.pyplot(
             render_rgb_array(
                 baseline_rgb,
-                f"{view_selection.selected_year} RGB | {scene_stamp}",
+                f"{view_selection.selected_year} RGB seasonal composite",
             )
         )
         return
 
-    if view_selection.mode == "Compare years" and scene_selection.output_mode == "NDVI + change":
+    if view_selection.mode == "Compare years" and output_mode == "NDVI + change":
         baseline_season = format_season_window(view_selection.baseline_year, analysis_settings)
         comparison_season = format_season_window(view_selection.comparison_year, analysis_settings)
-        baseline_stamp = format_scene_stamp(baseline_scene_meta)
-        comparison_stamp = format_scene_stamp(comparison_scene_meta)
-        st.subheader("NDVI comparison")
+        st.subheader("NDVI seasonal composite comparison")
         st.caption(
-            f"Baseline season: {baseline_season} ({baseline_stamp}) | "
-            f"Comparison season: {comparison_season} ({comparison_stamp})"
+            f"Baseline season: {baseline_season} | Comparison season: {comparison_season}"
+        )
+        st.caption(
+            f"Baseline scenes used: {len(baseline_used_rows)} | "
+            f"Comparison scenes used: {len(comparison_used_rows)}"
         )
         render_change_percentiles(summarize_change_percentiles(ndvi_diff))
 
         col1, col2, col3 = st.columns(3)
         with col1:
             st.subheader(f"Baseline NDVI: {view_selection.baseline_year}")
-            st.caption(f"Acquired: {baseline_stamp}")
             st.pyplot(
                 render_array(
                     baseline_ndvi,
-                    f"{view_selection.baseline_year} NDVI | {baseline_stamp}",
+                    f"{view_selection.baseline_year} NDVI seasonal composite",
                     mode="ndvi",
                     figsize=(5.5, 5.5),
                 )
@@ -647,36 +578,46 @@ def main():
             )
         with col3:
             st.subheader(f"Comparison NDVI: {view_selection.comparison_year}")
-            st.caption(f"Acquired: {comparison_stamp}")
             st.pyplot(
                 render_array(
                     comparison_ndvi,
-                    f"{view_selection.comparison_year} NDVI | {comparison_stamp}",
+                    f"{view_selection.comparison_year} NDVI seasonal composite",
                     mode="ndvi",
                     figsize=(5.5, 5.5),
                 )
             )
         return
 
-    if view_selection.mode == "Compare years" and scene_selection.output_mode == "RGB":
+    if view_selection.mode == "Compare years" and output_mode == "RGB":
         baseline_season = format_season_window(view_selection.baseline_year, analysis_settings)
         comparison_season = format_season_window(view_selection.comparison_year, analysis_settings)
-        baseline_stamp = format_scene_stamp(baseline_scene_meta)
-        comparison_stamp = format_scene_stamp(comparison_scene_meta)
-        st.subheader("RGB comparison")
+        st.subheader("RGB seasonal composite comparison")
         st.caption(
-            f"Baseline season: {baseline_season} ({baseline_stamp}) | "
-            f"Comparison season: {comparison_season} ({comparison_stamp})"
+            f"Baseline season: {baseline_season} | Comparison season: {comparison_season}"
+        )
+        st.caption(
+            f"Baseline scenes used: {len(baseline_used_rows)} | "
+            f"Comparison scenes used: {len(comparison_used_rows)}"
         )
         col1, col2 = st.columns(2)
         with col1:
             st.subheader(f"Baseline RGB: {view_selection.baseline_year}")
-            st.caption(f"Acquired: {baseline_stamp}")
-            st.pyplot(render_rgb_array(baseline_rgb, f"{view_selection.baseline_year} RGB | {baseline_stamp}", figsize=(6, 5.5)))
+            st.pyplot(
+                render_rgb_array(
+                    baseline_rgb,
+                    f"{view_selection.baseline_year} RGB seasonal composite",
+                    figsize=(6, 5.5),
+                )
+            )
         with col2:
             st.subheader(f"Comparison RGB: {view_selection.comparison_year}")
-            st.caption(f"Acquired: {comparison_stamp}")
-            st.pyplot(render_rgb_array(comparison_rgb, f"{view_selection.comparison_year} RGB | {comparison_stamp}", figsize=(6, 5.5)))
+            st.pyplot(
+                render_rgb_array(
+                    comparison_rgb,
+                    f"{view_selection.comparison_year} RGB seasonal composite",
+                    figsize=(6, 5.5),
+                )
+            )
         return
 
     baseline_summary = summarize_class_distribution(baseline.raster)
@@ -684,14 +625,16 @@ def main():
     change_percentiles = summarize_change_percentiles(change.ndvi_diff)
     baseline_season = format_season_window(view_selection.baseline_year, analysis_settings)
     comparison_season = format_season_window(view_selection.comparison_year, analysis_settings)
-    baseline_stamp = format_scene_stamp(baseline_scene_meta)
-    comparison_stamp = format_scene_stamp(comparison_scene_meta)
 
     st.subheader("Land cover summary")
     st.caption(
-        f"Baseline season: {baseline_season} ({baseline_stamp}) | "
-        f"Comparison season: {comparison_season} ({comparison_stamp})"
+        f"Baseline season: {baseline_season} | Comparison season: {comparison_season}"
     )
+    st.caption(
+        f"Baseline scenes used: {len(baseline_used_rows)} | "
+        f"Comparison scenes used: {len(comparison_used_rows)}"
+    )
+    st.caption("Classified maps and NDVI change are computed from all eligible scenes in each seasonal window.")
 
     st.dataframe(build_comparison_rows(baseline_summary, comparison_summary), width="stretch", hide_index=True)
     render_change_percentiles(change_percentiles)
@@ -700,11 +643,10 @@ def main():
 
     with col1:
         st.subheader(f"Baseline classified map: {view_selection.baseline_year}")
-        st.caption(f"Acquired: {baseline_stamp}")
         st.pyplot(
             render_array(
                 baseline.raster,
-                f"{view_selection.baseline_year} classification | {baseline_stamp}",
+                f"{view_selection.baseline_year} classified seasonal composite",
                 mode="classified",
                 figsize=(5.5, 5.5),
                 show_class_legend=False,
@@ -724,11 +666,10 @@ def main():
 
     with col3:
         st.subheader(f"Comparison classified map: {view_selection.comparison_year}")
-        st.caption(f"Acquired: {comparison_stamp}")
         st.pyplot(
             render_array(
                 comparison.raster,
-                f"{view_selection.comparison_year} classification | {comparison_stamp}",
+                f"{view_selection.comparison_year} classified seasonal composite",
                 mode="classified",
                 figsize=(5.5, 5.5),
                 show_class_legend=False,
@@ -737,12 +678,16 @@ def main():
 
     with st.expander("Show vegetation class legend"):
         st.markdown(
-            "0: Water / very low vegetation  \\n+1: Bare / sparse vegetation  \\n+2: Low vegetation  \\n+3: Moderate vegetation  \\n+4: High vegetation  \\n+5: Very high vegetation"
+            "0: Water / very low vegetation  \n"
+            "1: Bare / sparse vegetation  \n"
+            "2: Low vegetation  \n"
+            "3: Moderate vegetation  \n"
+            "4: High vegetation  \n"
+            "5: Very high vegetation"
         )
 
-    st.caption("Values are derived from the raster service pipeline for the selected scenes and seasonal settings.")
+    st.caption("Values are derived from the raster service pipeline for all eligible scenes and seasonal settings.")
 
 
 if __name__ == "__main__":
     main()
-
