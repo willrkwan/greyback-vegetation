@@ -4,13 +4,24 @@ This project compares seasonal vegetation-index patterns around Greyback Lake, B
 
 ## Implemented workflow
 
-1. Define a square study window centered near Greyback Lake. With `half_side_km=5`, the current window is approximately 10 km by 10 km.
-2. Query Landsat scenes for a selected year and seasonal date range. The available year range is 1984 through 2025.
-3. Use the STAC `eo:cloud_cover` field to filter scenes, then retain scenes with the required Landsat assets.
-4. Stack the red, near-infrared, QA, and RGB assets on a 30 m grid in UTM Zone 11N (`EPSG:32611`).
-5. Apply a Landsat `QA_PIXEL` bit mask to the red and near-infrared data, calculate NDVI, and take the temporal median across all eligible scenes in the seasonal window.
-6. Group the composite NDVI values with fixed thresholds of `-0.05`, `0.10`, `0.20`, `0.35`, and `0.50`.
-7. Compare two seasonal composites by subtracting the baseline NDVI from the comparison-year NDVI. Missing values remain `NaN` instead of being assigned to a vegetation class.
+1. Fetch the FWA assessment watershed containing the configured Greyback Lake coordinate (`49.630227703275324, -119.42400064714786`) from the British Columbia WFS service.
+2. Use the assessment watershed geometry as the area of interest (AOI). The current match is the Penticton Creek watershed (`WATERSHED_FEATURE_ID=12515`) and covers approximately 8,289 hectares.
+3. Query Landsat scenes for the AOI and a selected year and seasonal date range. The available year range is 1984 through 2025.
+4. Use the STAC `eo:cloud_cover` field to filter scenes, then retain scenes with the required Landsat assets.
+5. Stack the red, near-infrared, QA, and RGB assets on a 30 m grid in UTM Zone 11N (`EPSG:32611`), using the AOI bounds for scene discovery and masking pixels outside the watershed.
+6. Apply a Landsat `QA_PIXEL` bit mask to the red and near-infrared data, calculate NDVI, and take the temporal median across all eligible scenes in the seasonal window.
+7. Group the composite NDVI values with fixed thresholds of `-0.05`, `0.10`, `0.20`, `0.35`, and `0.50`.
+8. Compare two seasonal composites by subtracting the baseline NDVI from the comparison-year NDVI. Missing values remain `NaN` instead of being assigned to a vegetation class.
+
+## Assessment watershed AOI
+
+The AOI is retrieved from the BC Data Catalogue layer `WHSE_BASEMAPPING.FWA_ASSESSMENT_WATERSHEDS_POLY` through its WFS endpoint:
+
+`https://openmaps.gov.bc.ca/geo/pub/WHSE_BASEMAPPING.FWA_ASSESSMENT_WATERSHEDS_POLY/ows`
+
+The lookup uses the Greyback Lake point to select one polygon. The resulting geometry is cached by Streamlit for 24 hours. For local inspection, the notebook exports the selected feature to `data/processed/greyback_assessment_aoi.geojson`.
+
+The raster stack is requested over the polygon's bounding box because STAC requires a search footprint. After stacking, `rasterio.features.geometry_mask` removes pixels outside the actual assessment watershed. The polygon is transformed from WGS84 (`EPSG:4326`) to UTM Zone 11N (`EPSG:32611`) before raster masking.
 
 ## Streamlit application
 
@@ -34,11 +45,10 @@ The year-to-year difference is an exploratory comparison. Phenology, acquisition
 
 The repository does not include the validation workflow from the earlier project draft. There is no cutblock/PostGIS validation routine, confusion matrix, accuracy estimate, or Random Forest classifier. These remain future extensions.
 
-The study window is a geometric square, not a watershed boundary. Conclusions should stay within the configured study area unless a hydrologically derived catchment boundary is added.
+The current AOI is an FWA assessment watershed, a custom lake catchment. It is substantially larger than the lake itself, so conclusions describe the assessment watershed unless a more narrowly defined catchment is substituted.
 
 ## Future work
 
-- Replace the square window with a documented watershed or other defensible area of interest.
 - Report valid-pixel coverage, scene counts, and acquisition-date distributions for each composite.
 - Validate the NDVI categories or replace them with a supervised, multi-band land-cover classification.
 - Add an independent reference dataset and report a confusion matrix with class-specific accuracy measures.
