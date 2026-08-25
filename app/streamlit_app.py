@@ -1,5 +1,6 @@
 import os
 import sys
+import calendar
 from pathlib import Path
 from datetime import date, timedelta
 
@@ -30,7 +31,7 @@ def get_catalog():
     )
 
 
-YEAR_MIN = 2013
+YEAR_MIN = 1984
 YEAR_MAX = 2025
 
 
@@ -290,69 +291,86 @@ def render_scene_availability_table(title, scene_rows):
 
 def get_user_inputs():
     with st.sidebar:
-        st.subheader(":material/compare_arrows: Mode")
-        st.caption("Choose whether to inspect one year or compare two years side by side.")
-        mode = st.segmented_control("View mode", options=["Single year", "Compare years"], default="Compare years")
-
-        if mode == "Single year":
-            selected_year = st.slider(
-                "Selected year",
-                min_value=YEAR_MIN,
-                max_value=YEAR_MAX,
-                value=YEAR_MIN,
-                step=1,
-                help="Year used for a single-season vegetation classification.",
-            )
-            selection = ViewSelection(
-                mode=mode,
-                selected_year=selected_year,
-                baseline_year=selected_year,
-                comparison_year=None,
-            )
-        else:
-            baseline_year = st.slider("Baseline year", min_value=YEAR_MIN, max_value=YEAR_MAX, value=YEAR_MIN, step=1)
-            comparison_year = st.slider("Comparison year", min_value=YEAR_MIN, max_value=YEAR_MAX, value=2024, step=1)
-            selection = ViewSelection(
-                mode=mode,
-                selected_year=baseline_year,
-                baseline_year=baseline_year,
-                comparison_year=comparison_year,
+        with st.form("analysis_controls"):
+            st.subheader(":material/compare_arrows: Mode")
+            st.caption("Choose whether to inspect one year or compare two years side by side.")
+            mode = st.segmented_control(
+                "View mode",
+                options=["Single year", "Compare years"],
+                default="Compare years",
             )
 
-        st.markdown("---")
-        st.subheader(":material/tune: Analysis settings")
-        st.caption("Adjust the seasonal window used to fetch and aggregate Landsat imagery for each year.")
-        settings = AnalysisSettings(
-            season_start_month=st.slider(
+            year_options = list(range(YEAR_MIN, YEAR_MAX + 1))
+            if mode == "Single year":
+                selected_year = st.selectbox(
+                    "Selected year",
+                    options=year_options,
+                    index=0,
+                    help="Year used for a single-season vegetation classification.",
+                )
+                selection = ViewSelection(
+                    mode=mode,
+                    selected_year=selected_year,
+                    baseline_year=selected_year,
+                    comparison_year=None,
+                )
+            else:
+                baseline_year = st.selectbox(
+                    "Baseline year",
+                    options=year_options,
+                    index=0,
+                    help="Earlier year used as the reference for change analysis.",
+                )
+                comparison_year = st.selectbox(
+                    "Comparison year",
+                    options=year_options,
+                    index=year_options.index(2024),
+                    help="Later year compared with the baseline.",
+                )
+                selection = ViewSelection(
+                    mode=mode,
+                    selected_year=baseline_year,
+                    baseline_year=baseline_year,
+                    comparison_year=comparison_year,
+                )
+
+            st.markdown("---")
+            st.subheader(":material/tune: Analysis settings")
+            st.caption("Adjust the seasonal window used to fetch and aggregate Landsat imagery for each year.")
+            season_start_month = st.selectbox(
                 "Season start month",
-                min_value=1,
-                max_value=12,
-                value=7,
+                options=list(range(1, 13)),
+                index=6,
+                format_func=lambda month: date(2000, month, 1).strftime("%B"),
                 help="Month used to begin the seasonal window.",
-            ),
-            season_start_day=st.slider(
+            )
+            max_day = 28 if season_start_month == 2 else calendar.monthrange(2024, season_start_month)[1]
+            season_start_day = st.selectbox(
                 "Season start day",
-                min_value=1,
-                max_value=31,
-                value=1,
-                help="Day within the starting month.",
-            ),
-            duration_days=st.slider(
-                "Season length (days)",
-                min_value=7,
-                max_value=180,
-                value=31,
-                help="Number of days included in the window for each year.",
-            ),
-            max_cloud=st.slider(
-                "Cloud filter (%)",
-                min_value=0.0,
-                max_value=100.0,
-                value=10.0,
-                step=1.0,
-                help="The maximum acceptable cloud cover before a scene is excluded.",
-            ),
-        )
+                options=list(range(1, max_day + 1)),
+                index=0,
+                help="Day within the starting month. February is limited to 28 so every year remains valid.",
+            )
+            settings = AnalysisSettings(
+                season_start_month=season_start_month,
+                season_start_day=season_start_day,
+                duration_days=st.slider(
+                    "Season length (days)",
+                    min_value=7,
+                    max_value=180,
+                    value=31,
+                    help="Number of days included in the window for each year.",
+                ),
+                max_cloud=st.slider(
+                    "Cloud filter (%)",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=10.0,
+                    step=1.0,
+                    help="The maximum acceptable cloud cover before a scene is excluded.",
+                ),
+            )
+            st.form_submit_button("Apply analysis", type="primary", icon=":material/play_arrow:")
 
     return selection, settings
 

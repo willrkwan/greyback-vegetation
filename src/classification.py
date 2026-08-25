@@ -27,4 +27,7 @@ def classify_by_thresholds(index, thresholds: Sequence[float], class_values: Seq
 	for threshold, class_value in reversed(list(zip(thresholds, class_values[:-1]))):
 		classified = xr.where(index < threshold, class_value, classified)
 
+	# Preserve nodata so downstream visuals do not mask missing pixels as class 5.
+	classified = xr.where(np.isfinite(index), classified, np.nan)
+
 	return classified
