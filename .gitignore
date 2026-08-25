@@ -15,6 +15,7 @@
 # Data directories
 data/raw/
 data/processed/
+data/interim/
 
 # OS files
 .DS_Store

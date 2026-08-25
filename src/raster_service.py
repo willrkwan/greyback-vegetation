@@ -32,6 +32,9 @@ class RasterService:
         self.config = config
 
     def _build_footprint(self):
+        if self.config.aoi_geometry is not None:
+            return self.config.aoi_geometry
+
         return get_bounding_box_geojson(
             self.config.center_lat, 
             self.config.center_lon, 
@@ -107,7 +110,8 @@ class RasterService:
             footprint, 
             bands=[self.config.ndvi_num_band, self.config.ndvi_den_band, self.config.qa_band], 
             resolution=self.config.resolution, 
-            epsg=self.config.epsg
+            epsg=self.config.epsg,
+            aoi_geometry=self.config.aoi_geometry,
         )
 
         cloud_mask = build_landsat_cloud_mask(
@@ -163,6 +167,7 @@ class RasterService:
             bands=stack_bands,
             resolution=self.config.resolution,
             epsg=self.config.epsg,
+            aoi_geometry=self.config.aoi_geometry,
         )
 
         rgb = data.sel(band=[self.config.ndvi_den_band, self.config.green_band, self.config.blue_band])

@@ -6,9 +6,11 @@ from datetime import date, timedelta
 
 from dataclasses import dataclass
 from typing import Optional
+import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
 import pystac_client
+import requests
 import streamlit as st
 from matplotlib.colors import BoundaryNorm, LinearSegmentedColormap, ListedColormap, TwoSlopeNorm
 from matplotlib.patches import Patch
@@ -33,6 +35,38 @@ def get_catalog():
 
 YEAR_MIN = 1984
 YEAR_MAX = 2025
+ASSESSMENT_WATERSHED_WFS_URL = (
+    "https://openmaps.gov.bc.ca/geo/pub/"
+    "WHSE_BASEMAPPING.FWA_ASSESSMENT_WATERSHEDS_POLY/ows"
+)
+
+
+@st.cache_data(ttl=86400)
+def load_assessment_aoi() -> dict:
+    lon = -119.42400064714786
+    lat = 49.630227703275324
+    response = requests.get(
+        ASSESSMENT_WATERSHED_WFS_URL,
+        params={
+            "service": "WFS",
+            "version": "2.0.0",
+            "request": "GetFeature",
+            "typeNames": "WHSE_BASEMAPPING.FWA_ASSESSMENT_WATERSHEDS_POLY",
+            "outputFormat": "application/json",
+            "srsName": "EPSG:4326",
+            "bbox": f"{lon - 0.1},{lat - 0.1},{lon + 0.1},{lat + 0.1},EPSG:4326",
+        },
+        timeout=60,
+    )
+    response.raise_for_status()
+    candidates = gpd.GeoDataFrame.from_features(response.json(), crs="EPSG:4326")
+    point = gpd.GeoSeries.from_xy([lon], [lat], crs="EPSG:4326").iloc[0]
+    matches = candidates[candidates.geometry.intersects(point)]
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"Expected one assessment watershed at the AOI point, found {len(matches)}."
+        )
+    return matches.geometry.iloc[0].__geo_interface__
 
 
 @dataclass(frozen=True)
@@ -59,12 +93,14 @@ def load_service(
     max_cloud: float,
 ) -> RasterService:
     catalog = get_catalog()
+    aoi_geometry = load_assessment_aoi()
     config = RasterConfig(
         catalog=catalog,
         collection_id="landsat-c2-l2",
         center_lat=49.630227703275324,
         center_lon=-119.42400064714786,
         half_side_km=5.0,
+        aoi_geometry=aoi_geometry,
         season_start_month=season_start_month,
         season_start_day=season_start_day,
         duration_days=duration_days,

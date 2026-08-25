@@ -34,6 +34,7 @@ class RasterConfig:
     center_lon: float
 
     half_side_km: float = 5.0
+    aoi_geometry: dict | None = None
 
     season_start_month: int = 7
     season_start_day: int = 1
