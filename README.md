@@ -50,8 +50,6 @@ The repository does not include the validation workflow from the earlier project
 
 ## Future work
 
-- Report valid-pixel coverage, scene counts, and acquisition-date distributions for each composite.
 - Add more named band profiles or indices for spectral exploration.
-- Add an independent reference dataset and report a confusion matrix with class-specific accuracy measures.
 - Measure sensitivity to the seasonal window, cloud threshold, reducer, and index definitions.
 
