@@ -19,7 +19,9 @@ The AOI is retrieved from the BC Data Catalogue layer `WHSE_BASEMAPPING.FWA_ASSE
 
 `https://openmaps.gov.bc.ca/geo/pub/WHSE_BASEMAPPING.FWA_ASSESSMENT_WATERSHEDS_POLY/ows`
 
-The lookup uses the Greyback Lake point to select one polygon. The resulting geometry is cached by Streamlit for 24 hours. For local inspection, the notebook exports the selected feature to `data/processed/greyback_assessment_aoi.geojson`.
+The lookup uses the Greyback Lake point to select one polygon. The watershed notebook exports the selected feature to `data/aoi/greyback_assessment_aoi.geojson`. The Streamlit app reads this local artifact at runtime and does not contact the WFS service.
+
+To swap the AOI, export another polygon to the same path, or change `AOI_PATH` in `src/aoi.py` to point to a different GeoJSON file. The file must contain at least one feature with a valid CRS.
 
 The raster stack is requested over the polygon's bounding box because STAC requires a search footprint. After stacking, `rasterio.features.geometry_mask` removes pixels outside the actual assessment watershed. The polygon is transformed from WGS84 (`EPSG:4326`) to UTM Zone 11N (`EPSG:32611`) before raster masking.
 

@@ -6,11 +6,9 @@ from datetime import date, timedelta
 
 from dataclasses import dataclass
 from typing import Optional
-import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
 import pystac_client
-import requests
 import streamlit as st
 from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
 from planetary_computer import sign_inplace
@@ -20,6 +18,7 @@ os.environ.setdefault("MPLCONFIGDIR", str(ROOT / ".matplotlib_cache"))
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from src.aoi import load_aoi_geometry
 from src.models import BandProfile, RasterConfig
 from src.raster_service import NoClearPixelsError, NoScenesFoundError, RasterService
 
@@ -32,12 +31,8 @@ def get_catalog():
     )
 
 
-YEAR_MIN = 1984
-YEAR_MAX = 2025
-ASSESSMENT_WATERSHED_WFS_URL = (
-    "https://openmaps.gov.bc.ca/geo/pub/"
-    "WHSE_BASEMAPPING.FWA_ASSESSMENT_WATERSHEDS_POLY/ows"
-)
+YEAR_MIN = 2013
+YEAR_MAX = 2026
 
 
 def get_band_profiles(config: RasterConfig) -> dict[str, BandProfile]:
@@ -65,34 +60,6 @@ def get_band_profiles(config: RasterConfig) -> dict[str, BandProfile]:
     }
 
 
-@st.cache_data(ttl=86400)
-def load_assessment_aoi() -> dict:
-    lon = -119.42400064714786
-    lat = 49.630227703275324
-    response = requests.get(
-        ASSESSMENT_WATERSHED_WFS_URL,
-        params={
-            "service": "WFS",
-            "version": "2.0.0",
-            "request": "GetFeature",
-            "typeNames": "WHSE_BASEMAPPING.FWA_ASSESSMENT_WATERSHEDS_POLY",
-            "outputFormat": "application/json",
-            "srsName": "EPSG:4326",
-            "bbox": f"{lon - 0.1},{lat - 0.1},{lon + 0.1},{lat + 0.1},EPSG:4326",
-        },
-        timeout=60,
-    )
-    response.raise_for_status()
-    candidates = gpd.GeoDataFrame.from_features(response.json(), crs="EPSG:4326")
-    point = gpd.GeoSeries.from_xy([lon], [lat], crs="EPSG:4326").iloc[0]
-    matches = candidates[candidates.geometry.intersects(point)]
-    if len(matches) != 1:
-        raise RuntimeError(
-            f"Expected one assessment watershed at the AOI point, found {len(matches)}."
-        )
-    return matches.geometry.iloc[0].__geo_interface__
-
-
 @dataclass(frozen=True)
 class ViewSelection:
     mode: str
@@ -117,7 +84,7 @@ def load_service(
     max_cloud: float,
 ) -> RasterService:
     catalog = get_catalog()
-    aoi_geometry = load_assessment_aoi()
+    aoi_geometry = load_aoi_geometry()
     config = RasterConfig(
         catalog=catalog,
         collection_id="landsat-c2-l2",
@@ -342,7 +309,7 @@ def get_user_inputs():
                 comparison_year = st.selectbox(
                     "Comparison year",
                     options=year_options,
-                    index=year_options.index(2024),
+                    index=len(year_options) - 1,
                     help="Later year compared with the baseline.",
                 )
                 selection = ViewSelection(
