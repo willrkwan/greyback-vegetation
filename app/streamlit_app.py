@@ -12,8 +12,7 @@ import numpy as np
 import pystac_client
 import requests
 import streamlit as st
-from matplotlib.colors import BoundaryNorm, LinearSegmentedColormap, ListedColormap, TwoSlopeNorm
-from matplotlib.patches import Patch
+from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
 from planetary_computer import sign_inplace
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -143,51 +142,17 @@ def load_service(
     return RasterService(config)
 
 
-def render_array(array, title, mode="continuous", figsize=(8, 6), show_class_legend=True):
+def render_array(array, title, mode="continuous", figsize=(8, 6)):
     fig, ax = plt.subplots(figsize=figsize)
 
-    if mode == "classified":
-        colors = [
-            "#d73027",
-            "#fc8d59",
-            "#fee08b",
-            "#d9ef8b",
-            "#91cf60",
-            "#1a9850",
-        ]
-        class_names = [
-            "Water / very low vegetation",
-            "Bare / sparse vegetation",
-            "Low vegetation",
-            "Moderate vegetation",
-            "High vegetation",
-            "Very high vegetation",
-        ]
-
-        discrete_cmap = ListedColormap(colors)
-        norm = BoundaryNorm(np.arange(-0.5, 6.5, 1), discrete_cmap.N)
-        ax.imshow(array.values, cmap=discrete_cmap, norm=norm)
-
-        if show_class_legend:
-            legend_elements = [
-                Patch(facecolor=color, label=f"{idx}: {name}")
-                for idx, (color, name) in enumerate(zip(colors, class_names))
-            ]
-            ax.legend(
-                handles=legend_elements,
-                title="Vegetation class",
-                loc="upper left",
-                bbox_to_anchor=(1.02, 1),
-            )
-    else:
-        ndvi_cmap = LinearSegmentedColormap.from_list(
-            "ndvi_change",
-            [(0.0, "red"), (0.5, "grey"), (1.0, "green")],
-        )
-        norm = TwoSlopeNorm(vmin=-1.0, vcenter=0.0, vmax=1.0)
-        img = ax.imshow(array.values, cmap=ndvi_cmap, norm=norm)
-        colorbar_label = "NDVI" if mode == "ndvi" else "NDVI change"
-        fig.colorbar(img, ax=ax, fraction=0.046, pad=0.04, label=colorbar_label)
+    ndvi_cmap = LinearSegmentedColormap.from_list(
+        "ndvi_change",
+        [(0.0, "red"), (0.5, "grey"), (1.0, "green")],
+    )
+    norm = TwoSlopeNorm(vmin=-1.0, vcenter=0.0, vmax=1.0)
+    img = ax.imshow(array.values, cmap=ndvi_cmap, norm=norm)
+    colorbar_label = "NDVI" if mode == "ndvi" else "NDVI change"
+    fig.colorbar(img, ax=ax, fraction=0.046, pad=0.04, label=colorbar_label)
 
     ax.set_title(title)
     ax.axis("off")
@@ -221,32 +186,6 @@ def render_rgb_array(array, title, figsize=(8, 6)):
     return fig
 
 
-CLASS_NAMES = [
-    "Water / very low vegetation",
-    "Bare / sparse vegetation",
-    "Low vegetation",
-    "Moderate vegetation",
-    "High vegetation",
-    "Very high vegetation",
-]
-
-
-def summarize_class_distribution(classified_array):
-    values = np.asarray(classified_array.values if hasattr(classified_array, "values") else classified_array)
-    flat = values.ravel()
-    valid = flat[np.isfinite(flat)]
-
-    if valid.size == 0:
-        return {idx: 0.0 for idx in range(len(CLASS_NAMES))}
-
-    counts = np.bincount(valid.astype(int), minlength=len(CLASS_NAMES))
-    total = counts.sum()
-    if total == 0:
-        return {idx: 0.0 for idx in range(len(CLASS_NAMES))}
-
-    return {idx: float(count / total * 100.0) for idx, count in enumerate(counts)}
-
-
 def summarize_change_percentiles(change_array):
     values = np.asarray(change_array.values if hasattr(change_array, "values") else change_array, dtype=float)
     valid = values[np.isfinite(values)]
@@ -263,17 +202,6 @@ def summarize_change_percentiles(change_array):
     }
 
 
-def build_class_distribution_rows(summary):
-    return [
-        {
-            "Class": idx,
-            "Vegetation class": CLASS_NAMES[idx],
-            "Share of pixels": round(summary[idx], 2),
-        }
-        for idx in range(len(CLASS_NAMES))
-    ]
-
-
 def render_change_percentiles(percentiles):
     st.caption("NDVI change percentiles")
     cols = st.columns(5)
@@ -288,6 +216,10 @@ def format_season_window(year, settings):
     start_dt = date(year, settings.season_start_month, settings.season_start_day)
     end_dt = start_dt + timedelta(days=settings.duration_days - 1)
     return f"{start_dt.isoformat()} to {end_dt.isoformat()}"
+
+
+def reset_analysis_submission():
+    st.session_state["analysis_submitted"] = False
 
 
 @st.cache_data(ttl=600)
@@ -316,7 +248,7 @@ def get_scene_rows(year, season_start_month, season_start_day, duration_days, ma
 def get_profile_for_output(output_mode, profiles):
     profile_name = (
         "NDVI"
-        if output_mode in {"Classified", "NDVI", "NDVI + change"}
+        if output_mode in {"NDVI", "NDVI + change"}
         else "RGB"
     )
     return profiles[profile_name]
@@ -375,15 +307,17 @@ def render_scene_availability_table(title, scene_rows, profiles, qa_band):
 
 def get_user_inputs():
     with st.sidebar:
-        with st.form("analysis_controls"):
-            st.subheader(":material/compare_arrows: Mode")
-            st.caption("Choose whether to inspect one year or compare two years side by side.")
-            mode = st.segmented_control(
-                "View mode",
-                options=["Single year", "Compare years"],
-                default="Compare years",
-            )
+        st.subheader(":material/compare_arrows: Mode")
+        st.caption("Choose whether to inspect one year or compare two years side by side.")
+        mode = st.selectbox(
+            "View mode",
+            options=["Single year", "Compare years"],
+            index=1,
+            key="view_mode",
+            on_change=reset_analysis_submission,
+        )
 
+        with st.form("analysis_controls"):
             year_options = list(range(YEAR_MIN, YEAR_MAX + 1))
             if mode == "Single year":
                 selected_year = st.selectbox(
@@ -454,14 +388,21 @@ def get_user_inputs():
                     help="The maximum acceptable cloud cover before a scene is excluded.",
                 ),
             )
-            st.form_submit_button("Apply analysis", type="primary", icon=":material/play_arrow:")
+            submitted = st.form_submit_button(
+                "Apply analysis",
+                type="primary",
+                icon=":material/play_arrow:",
+            )
 
-    return selection, settings
+    if submitted:
+        st.session_state["analysis_submitted"] = True
+
+    return selection, settings, st.session_state.get("analysis_submitted", False)
 
 
 def get_output_mode_config(view_selection):
     if view_selection.mode == "Single year":
-        return ["Classified", "NDVI", "RGB"], "Classified"
+        return ["NDVI", "RGB"], "NDVI"
     return ["NDVI + change", "RGB"], "NDVI + change"
 
 
@@ -483,7 +424,11 @@ def main():
     st.title("Greyback Lake vegetation analysis")
     st.caption("Explore seasonal vegetation patterns and compare NDVI-driven land cover change across years.")
 
-    view_selection, analysis_settings = get_user_inputs()
+    view_selection, analysis_settings, analysis_submitted = get_user_inputs()
+
+    if not analysis_submitted:
+        st.info("Choose the analysis settings, then select Apply analysis to run the workflow.")
+        return
 
     if view_selection.mode == "Compare years" and view_selection.comparison_year == view_selection.baseline_year:
         st.warning("Baseline and comparison years must be different for change analysis.")
@@ -583,9 +528,7 @@ def main():
 
     try:
         with st.spinner("Loading composite output from eligible scenes..."):
-            if view_selection.mode == "Single year" and output_mode == "Classified":
-                baseline = service.build_classified_raster(view_selection.selected_year)
-            elif view_selection.mode == "Single year" and output_mode == "NDVI":
+            if view_selection.mode == "Single year" and output_mode == "NDVI":
                 baseline_ndvi = build_profile_raster(
                     service, view_selection.selected_year, output_profile
                 )
@@ -620,32 +563,11 @@ def main():
         st.error(f"Unexpected processing error: {exc}")
         return
 
-    if view_selection.mode == "Single year" and output_mode == "Classified":
-        season_text = format_season_window(view_selection.selected_year, analysis_settings)
-        st.subheader(f"{view_selection.selected_year} classified NDVI composite")
-        st.caption(
-            f"Seasonal window: {season_text} | "
-            f"Eligible scenes used in composite: {len(baseline_used_rows)}"
-        )
-
-        class_summary = summarize_class_distribution(baseline.raster)
-        st.dataframe(build_class_distribution_rows(class_summary), width="stretch", hide_index=True)
-
-        st.pyplot(
-            render_array(
-                baseline.raster,
-                f"{view_selection.selected_year} classified seasonal composite",
-                mode="classified",
-            )
-        )
-        return
-
     if view_selection.mode == "Single year" and output_mode == "NDVI":
         season_text = format_season_window(view_selection.selected_year, analysis_settings)
         st.subheader(f"{view_selection.selected_year} NDVI composite")
         st.caption(
-            f"Seasonal window: {season_text} | "
-            f"Eligible scenes used in composite: {len(baseline_used_rows)}"
+            f"Seasonal window: {season_text}"
         )
         st.pyplot(
             render_array(
@@ -660,8 +582,7 @@ def main():
         season_text = format_season_window(view_selection.selected_year, analysis_settings)
         st.subheader(f"{view_selection.selected_year} RGB composite")
         st.caption(
-            f"Seasonal window: {season_text} | "
-            f"Eligible scenes used in composite: {len(baseline_used_rows)}"
+            f"Seasonal window: {season_text}"
         )
         st.pyplot(
             render_rgb_array(
