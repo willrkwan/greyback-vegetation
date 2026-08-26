@@ -4,14 +4,12 @@ This project examines seasonal vegetation indices around Greyback Lake, British 
 
 ## Current workflow
 
-1. Use the watershed notebook to identify the FWA assessment watershed containing the Greyback Lake coordinate (`49.630227703275324, -119.42400064714786`).
-2. Save the selected polygon as `data/aoi/greyback_assessment_aoi.geojson`. The current feature is the Penticton Creek watershed (`WATERSHED_FEATURE_ID=12515`), covering about 8,289 hectares.
-3. Read the local AOI in the app and use its bounds to search Landsat scenes for a selected year and seasonal date range. The app supports years 2013 through 2026.
-4. Filter scenes with the STAC `eo:cloud_cover` field and keep scenes that contain the bands required by the selected profile.
-5. Stack imagery on a 30 m grid in UTM Zone 11N (`EPSG:32611`). The stack uses the AOI bounds for scene discovery, then masks pixels outside the polygon.
-6. Apply the Landsat `QA_PIXEL` mask where required, calculate continuous indices or band composites, and reduce the eligible scenes across the seasonal window.
-7. Use named band profiles for NDVI, NBR, and RGB. NDVI uses `nir08` and `red`; NBR uses `nir08` and `swir22`; RGB uses `red`, `green`, and `blue`.
-8. Compare two seasonal NDVI composites by subtracting baseline values from comparison-year values. Missing pixels remain `NaN`.
+1. Read the committed AOI from `data/aoi/greyback_assessment_aoi.geojson` and use its bounds to search Landsat scenes for a selected year and seasonal date range. The app supports years 2013 through 2026.
+2. Filter scenes with the STAC `eo:cloud_cover` field and keep scenes that contain the bands required by the selected profile.
+3. Stack imagery on a 30 m grid in UTM Zone 11N (`EPSG:32611`). The stack uses the AOI bounds for scene discovery, then masks pixels outside the polygon.
+4. Apply the Landsat `QA_PIXEL` mask where required, calculate continuous indices or band composites, and reduce the eligible scenes across the seasonal window.
+5. Use named band profiles for NDVI, NBR, and RGB. NDVI uses `nir08` and `red`; NBR uses `nir08` and `swir22`; RGB uses `red`, `green`, and `blue`.
+6. Compare two seasonal NDVI composites by subtracting baseline values from comparison-year values. Missing pixels remain `NaN`.
 
 ## Assessment watershed AOI
 
@@ -19,7 +17,7 @@ The AOI was identified from the BC Data Catalogue layer `WHSE_BASEMAPPING.FWA_AS
 
 `https://openmaps.gov.bc.ca/geo/pub/WHSE_BASEMAPPING.FWA_ASSESSMENT_WATERSHEDS_POLY/ows`
 
-The watershed notebook performs the lookup and exports the selected polygon to `data/aoi/greyback_assessment_aoi.geojson`. The Streamlit app reads that local file and does not contact the WFS service.
+The selected polygon is committed at `data/aoi/greyback_assessment_aoi.geojson`. The Streamlit app reads that local file and does not contact the WFS service.
 
 To use another AOI, export a polygon to the same path or change `AOI_PATH` in `src/aoi.py`. The file must contain at least one feature with a valid CRS.
 
