@@ -46,7 +46,7 @@ The year-to-year difference is exploratory. Phenology, acquisition timing, scene
 
 The current AOI is an FWA assessment watershed, not a custom lake catchment. It is substantially larger than the lake, so conclusions describe the assessment watershed unless a narrower catchment is substituted.
 
-The repository does not include the validation workflow from the earlier project draft. There is no cutblock/PostGIS validation routine, confusion matrix, accuracy estimate, or Random Forest classifier.
+The repository does not include the validation workflow from the earlier project draft. There is no cutblock validation routine, confusion matrix, accuracy estimate, or Random Forest classifier.
 
 ## Future work
 
