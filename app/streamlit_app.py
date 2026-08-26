@@ -21,7 +21,7 @@ os.environ.setdefault("MPLCONFIGDIR", str(ROOT / ".matplotlib_cache"))
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.models import RasterConfig
+from src.models import BandProfile, RasterConfig
 from src.raster_service import NoClearPixelsError, NoScenesFoundError, RasterService
 
 
@@ -39,6 +39,31 @@ ASSESSMENT_WATERSHED_WFS_URL = (
     "https://openmaps.gov.bc.ca/geo/pub/"
     "WHSE_BASEMAPPING.FWA_ASSESSMENT_WATERSHEDS_POLY/ows"
 )
+
+
+def get_band_profiles(config: RasterConfig) -> dict[str, BandProfile]:
+    return {
+        "NDVI": BandProfile(
+            name="NDVI",
+            bands=(config.ndvi_num_band, config.ndvi_den_band),
+            kind="normalized_difference",
+            numerator_band=config.ndvi_num_band,
+            denominator_band=config.ndvi_den_band,
+        ),
+        "NBR": BandProfile(
+            name="NBR",
+            bands=(config.nbr_num_band, config.nbr_den_band),
+            kind="normalized_difference",
+            numerator_band=config.nbr_num_band,
+            denominator_band=config.nbr_den_band,
+        ),
+        "RGB": BandProfile(
+            name="RGB",
+            bands=(config.red_band, config.green_band, config.blue_band),
+            kind="composite",
+            apply_cloud_mask=False,
+        ),
+    }
 
 
 @st.cache_data(ttl=86400)
@@ -249,19 +274,6 @@ def build_class_distribution_rows(summary):
     ]
 
 
-def build_comparison_rows(baseline_summary, comparison_summary):
-    return [
-        {
-            "Class": idx,
-            "Vegetation class": CLASS_NAMES[idx],
-            "Baseline %": round(baseline_summary[idx], 2),
-            "Comparison %": round(comparison_summary[idx], 2),
-            "Change % points": round(comparison_summary[idx] - baseline_summary[idx], 2),
-        }
-        for idx in range(len(CLASS_NAMES))
-    ]
-
-
 def render_change_percentiles(percentiles):
     st.caption("NDVI change percentiles")
     cols = st.columns(5)
@@ -295,20 +307,55 @@ def get_scene_rows(year, season_start_month, season_start_day, duration_days, ma
                 "acquired_at": summary.acquired_at,
                 "cloud_cover": summary.cloud_cover,
                 "platform": summary.platform,
-                "has_ndvi_bands": summary.has_ndvi_bands,
-                "has_rgb_bands": summary.has_rgb_bands,
+                "available_bands": summary.available_bands,
             }
         )
     return rows
 
 
-def filter_scene_rows_for_output(scene_rows, output_mode):
-    if output_mode in {"Classified", "NDVI", "Classified + change", "NDVI + change"}:
-        return [row for row in scene_rows if row["has_ndvi_bands"]]
-    return [row for row in scene_rows if row["has_rgb_bands"]]
+def get_profile_for_output(output_mode, profiles):
+    profile_name = (
+        "NDVI"
+        if output_mode in {"Classified", "NDVI", "NDVI + change"}
+        else "RGB"
+    )
+    return profiles[profile_name]
 
 
-def render_scene_availability_table(title, scene_rows):
+def get_required_bands(profile, qa_band):
+    required_bands = set(profile.bands)
+    if profile.apply_cloud_mask:
+        required_bands.add(qa_band)
+    return required_bands
+
+
+def build_profile_raster(service, year, profile):
+    if profile.kind == "normalized_difference":
+        return service.build_normalized_difference(
+            year,
+            numerator_band=profile.numerator_band,
+            denominator_band=profile.denominator_band,
+            apply_cloud_mask=profile.apply_cloud_mask,
+        )
+    return service.build_composite(
+        year,
+        bands=profile.bands,
+        apply_cloud_mask=profile.apply_cloud_mask,
+    )
+
+
+def filter_scene_rows_for_output(scene_rows, output_mode, profiles, qa_band):
+    required_bands = get_required_bands(
+        get_profile_for_output(output_mode, profiles),
+        qa_band,
+    )
+    return [
+        row for row in scene_rows
+        if required_bands.issubset(row["available_bands"])
+    ]
+
+
+def render_scene_availability_table(title, scene_rows, profiles, qa_band):
     st.caption(title)
     table_rows = []
     for row in scene_rows:
@@ -318,8 +365,9 @@ def render_scene_availability_table(title, scene_rows):
                 "Acquired": row["acquired_at"],
                 "Cloud %": None if row["cloud_cover"] is None else round(row["cloud_cover"], 1),
                 "Platform": row["platform"],
-                "NDVI ready": row["has_ndvi_bands"],
-                "RGB ready": row["has_rgb_bands"],
+                "Available bands": ", ".join(sorted(row["available_bands"])),
+                "NDVI ready": get_required_bands(profiles["NDVI"], qa_band).issubset(row["available_bands"]),
+                "RGB ready": get_required_bands(profiles["RGB"], qa_band).issubset(row["available_bands"]),
             }
         )
     st.dataframe(table_rows, width="stretch", hide_index=True)
@@ -414,7 +462,7 @@ def get_user_inputs():
 def get_output_mode_config(view_selection):
     if view_selection.mode == "Single year":
         return ["Classified", "NDVI", "RGB"], "Classified"
-    return ["Classified + change", "NDVI + change", "RGB"], "Classified + change"
+    return ["NDVI + change", "RGB"], "NDVI + change"
 
 
 def get_output_mode_from_state(view_selection):
@@ -447,6 +495,7 @@ def main():
         duration_days=analysis_settings.duration_days,
         max_cloud=analysis_settings.max_cloud,
     )
+    band_profiles = get_band_profiles(service.config)
 
     baseline_scene_rows = get_scene_rows(
         year=view_selection.baseline_year,
@@ -481,7 +530,12 @@ def main():
 
     output_mode, output_options, output_default = get_output_mode_from_state(view_selection)
 
-    baseline_used_rows = filter_scene_rows_for_output(baseline_scene_rows, output_mode)
+    baseline_used_rows = filter_scene_rows_for_output(
+        baseline_scene_rows,
+        output_mode,
+        band_profiles,
+        service.config.qa_band,
+    )
     if not baseline_used_rows:
         st.warning("No baseline scenes are eligible for the selected composite output.")
         st.info("Try another output mode or loosen the cloud and season filters.")
@@ -489,16 +543,31 @@ def main():
 
     comparison_used_rows = []
     if view_selection.mode == "Compare years":
-        comparison_used_rows = filter_scene_rows_for_output(comparison_scene_rows, output_mode)
+        comparison_used_rows = filter_scene_rows_for_output(
+            comparison_scene_rows,
+            output_mode,
+            band_profiles,
+            service.config.qa_band,
+        )
         if not comparison_used_rows:
             st.warning("No comparison scenes are eligible for the selected composite output.")
             st.info("Try another output mode or loosen the cloud and season filters.")
             return
 
     st.subheader("Eligible scenes used in composite")
-    render_scene_availability_table(f"{view_selection.baseline_year} scenes used", baseline_used_rows)
+    render_scene_availability_table(
+        f"{view_selection.baseline_year} scenes used",
+        baseline_used_rows,
+        band_profiles,
+        service.config.qa_band,
+    )
     if view_selection.mode == "Compare years":
-        render_scene_availability_table(f"{view_selection.comparison_year} scenes used", comparison_used_rows)
+        render_scene_availability_table(
+            f"{view_selection.comparison_year} scenes used",
+            comparison_used_rows,
+            band_profiles,
+            service.config.qa_band,
+        )
 
     st.subheader("Output")
     selected_mode = st.segmented_control(
@@ -510,29 +579,35 @@ def main():
     if selected_mode != output_mode:
         st.rerun()
     output_mode = selected_mode
+    output_profile = get_profile_for_output(output_mode, band_profiles)
 
     try:
         with st.spinner("Loading composite output from eligible scenes..."):
             if view_selection.mode == "Single year" and output_mode == "Classified":
                 baseline = service.build_classified_raster(view_selection.selected_year)
             elif view_selection.mode == "Single year" and output_mode == "NDVI":
-                baseline_ndvi = service.build_ndvi_raster(view_selection.selected_year)
-            elif view_selection.mode == "Single year" and output_mode == "RGB":
-                baseline_rgb = service.build_rgb_raster(view_selection.selected_year)
-            elif view_selection.mode == "Compare years" and output_mode == "Classified + change":
-                change = service.build_change_raster(
-                    view_selection.baseline_year,
-                    view_selection.comparison_year,
+                baseline_ndvi = build_profile_raster(
+                    service, view_selection.selected_year, output_profile
                 )
-                baseline = change.base_classified
-                comparison = change.target_classified
+            elif view_selection.mode == "Single year" and output_mode == "RGB":
+                baseline_rgb = build_profile_raster(
+                    service, view_selection.selected_year, output_profile
+                )
             elif view_selection.mode == "Compare years" and output_mode == "NDVI + change":
-                baseline_ndvi = service.build_ndvi_raster(view_selection.baseline_year)
-                comparison_ndvi = service.build_ndvi_raster(view_selection.comparison_year)
+                baseline_ndvi = build_profile_raster(
+                    service, view_selection.baseline_year, output_profile
+                )
+                comparison_ndvi = build_profile_raster(
+                    service, view_selection.comparison_year, output_profile
+                )
                 ndvi_diff = comparison_ndvi - baseline_ndvi
             else:
-                baseline_rgb = service.build_rgb_raster(view_selection.baseline_year)
-                comparison_rgb = service.build_rgb_raster(view_selection.comparison_year)
+                baseline_rgb = build_profile_raster(
+                    service, view_selection.baseline_year, output_profile
+                )
+                comparison_rgb = build_profile_raster(
+                    service, view_selection.comparison_year, output_profile
+                )
     except NoScenesFoundError as exc:
         st.warning(str(exc))
         st.info("Try another year, widen the seasonal window, or loosen the cloud filter.")
@@ -603,10 +678,6 @@ def main():
         st.caption(
             f"Baseline season: {baseline_season} | Comparison season: {comparison_season}"
         )
-        st.caption(
-            f"Baseline scenes used: {len(baseline_used_rows)} | "
-            f"Comparison scenes used: {len(comparison_used_rows)}"
-        )
         render_change_percentiles(summarize_change_percentiles(ndvi_diff))
 
         col1, col2, col3 = st.columns(3)
@@ -649,10 +720,6 @@ def main():
         st.caption(
             f"Baseline season: {baseline_season} | Comparison season: {comparison_season}"
         )
-        st.caption(
-            f"Baseline scenes used: {len(baseline_used_rows)} | "
-            f"Comparison scenes used: {len(comparison_used_rows)}"
-        )
         col1, col2 = st.columns(2)
         with col1:
             st.subheader(f"Baseline RGB: {view_selection.baseline_year}")
@@ -674,73 +741,7 @@ def main():
             )
         return
 
-    baseline_summary = summarize_class_distribution(baseline.raster)
-    comparison_summary = summarize_class_distribution(comparison.raster)
-    change_percentiles = summarize_change_percentiles(change.ndvi_diff)
-    baseline_season = format_season_window(view_selection.baseline_year, analysis_settings)
-    comparison_season = format_season_window(view_selection.comparison_year, analysis_settings)
-
-    st.subheader("Land cover summary")
-    st.caption(
-        f"Baseline season: {baseline_season} | Comparison season: {comparison_season}"
-    )
-    st.caption(
-        f"Baseline scenes used: {len(baseline_used_rows)} | "
-        f"Comparison scenes used: {len(comparison_used_rows)}"
-    )
-    st.caption("Classified maps and NDVI change are computed from all eligible scenes in each seasonal window.")
-
-    st.dataframe(build_comparison_rows(baseline_summary, comparison_summary), width="stretch", hide_index=True)
-    render_change_percentiles(change_percentiles)
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.subheader(f"Baseline classified map: {view_selection.baseline_year}")
-        st.pyplot(
-            render_array(
-                baseline.raster,
-                f"{view_selection.baseline_year} classified seasonal composite",
-                mode="classified",
-                figsize=(5.5, 5.5),
-                show_class_legend=False,
-            )
-        )
-
-    with col2:
-        st.subheader("NDVI change")
-        st.pyplot(
-            render_array(
-                change.ndvi_diff,
-                f"{view_selection.baseline_year} to {view_selection.comparison_year} change",
-                mode="continuous",
-                figsize=(5.5, 5.5),
-            )
-        )
-
-    with col3:
-        st.subheader(f"Comparison classified map: {view_selection.comparison_year}")
-        st.pyplot(
-            render_array(
-                comparison.raster,
-                f"{view_selection.comparison_year} classified seasonal composite",
-                mode="classified",
-                figsize=(5.5, 5.5),
-                show_class_legend=False,
-            )
-        )
-
-    with st.expander("Show vegetation class legend"):
-        st.markdown(
-            "0: Water / very low vegetation  \n"
-            "1: Bare / sparse vegetation  \n"
-            "2: Low vegetation  \n"
-            "3: Moderate vegetation  \n"
-            "4: High vegetation  \n"
-            "5: Very high vegetation"
-        )
-
-    st.caption("Values are derived from the raster service pipeline for all eligible scenes and seasonal settings.")
+    st.error("Unsupported output mode.")
 
 
 if __name__ == "__main__":

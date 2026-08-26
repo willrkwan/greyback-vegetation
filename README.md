@@ -53,4 +53,4 @@ The current AOI is an FWA assessment watershed, a custom lake catchment. It is s
 - Validate the NDVI categories or replace them with a supervised, multi-band land-cover classification.
 - Add an independent reference dataset and report a confusion matrix with class-specific accuracy measures.
 - Measure sensitivity to the seasonal window, cloud threshold, reducer, and NDVI thresholds.
-- Examine reservoir or water-level relationships after validating the spatial and temporal analysis.
+

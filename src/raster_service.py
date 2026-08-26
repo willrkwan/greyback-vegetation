@@ -1,5 +1,6 @@
 from .classification import classify_by_thresholds
 from .indices import compute_normalized_difference
+from .preprocessing import temporal_composite
 from .ingest import (
     get_bounding_box_geojson, 
     get_season_date_ranges, 
@@ -32,6 +33,8 @@ class RasterService:
         self.config = config
 
     def _build_footprint(self):
+        """Return a GeoJSON footprint for the configured AOI, either from the AOI geometry
+         or a bounding box around the center point."""
         if self.config.aoi_geometry is not None:
             return self.config.aoi_geometry
 
@@ -76,8 +79,7 @@ class RasterService:
                     acquired_at=str(item.datetime) if item.datetime is not None else "",
                     cloud_cover=float(cloud_cover) if cloud_cover is not None else None,
                     platform=item.properties.get("platform"),
-                    has_ndvi_bands=self.config.ndvi_num_band in assets and self.config.ndvi_den_band in assets and self.config.qa_band in assets,
-                    has_rgb_bands=self.config.ndvi_den_band in assets and self.config.green_band in assets and self.config.blue_band in assets,
+                    available_bands=frozenset(assets),
                 )
             )
 
@@ -93,73 +95,30 @@ class RasterService:
     def _filter_items_by_assets(items, required_assets: set[str]):
         return [item for item in items if required_assets.issubset(set(item.assets.keys()))]
 
-    def build_ndvi_raster(self, year: int, scene_id: str | None = None):
-        """Build an NDVI raster for a year or a selected scene within that year."""
+    def _load_stack(
+        self,
+        year: int,
+        bands: tuple[str, ...],
+        scene_id: str | None = None,
+        apply_cloud_mask: bool = True,
+    ):
         footprint, items = self._search_items_for_year(year)
         items = self._select_scene(items, scene_id)
-        required_assets = {self.config.ndvi_num_band, self.config.ndvi_den_band, self.config.qa_band}
-        items = self._filter_items_by_assets(items, required_assets)
-        if not items:
-            raise NoScenesFoundError(
-                f"No NDVI-eligible scenes found for year {year} in the selected seasonal window "
-                f"for scene_id={scene_id!r}. Try a different selection or a wider date range."
-            )
 
-        data = stack_items(
-            items, 
-            footprint, 
-            bands=[self.config.ndvi_num_band, self.config.ndvi_den_band, self.config.qa_band], 
-            resolution=self.config.resolution, 
-            epsg=self.config.epsg,
-            aoi_geometry=self.config.aoi_geometry,
-        )
+        requested_bands = tuple(dict.fromkeys(bands))
+        if not requested_bands:
+            raise ValueError("At least one imagery band is required.")
 
-        cloud_mask = build_landsat_cloud_mask(
-            data, 
-            qa_band=self.config.qa_band, 
-            cloud_bits=self.config.cloud_bits
-        )
-        if cloud_mask is None or not bool(cloud_mask.any()):
-            raise NoClearPixelsError(
-                f"No usable clear-sky pixels remained for year {year} after masking. "
-                "Try a higher cloud threshold or a different season."
-            )
-
-        ndvi = compute_normalized_difference(
-            data, 
-            num_band=self.config.ndvi_num_band, 
-            den_band=self.config.ndvi_den_band, 
-            mask=cloud_mask, 
-            reducer=self.config.reducer, 
-            compute=self.config.compute
-        )
-        if ndvi is None or ndvi.size == 0:
-            raise NoClearPixelsError(
-                f"The NDVI result for year {year} contained no valid pixels after filtering."
-            )
-
-        return ndvi
-
-    def build_rgb_raster(self, year: int, scene_id: str | None = None, apply_cloud_mask: bool = False):
-        """Build an RGB raster for a year or a selected scene within that year.
-
-        RGB visualization keeps cloudy pixels by default so the scene footprint remains visible.
-        """
-        footprint, items = self._search_items_for_year(year)
-        items = self._select_scene(items, scene_id)
-        required_assets = {self.config.ndvi_den_band, self.config.green_band, self.config.blue_band}
-        if apply_cloud_mask:
-            required_assets.add(self.config.qa_band)
-        items = self._filter_items_by_assets(items, required_assets)
-        if not items:
-            raise NoScenesFoundError(
-                f"No RGB-eligible scenes found for year {year} in the selected seasonal window "
-                f"for scene_id={scene_id!r}. Try a different selection or a wider date range."
-            )
-
-        stack_bands = [self.config.ndvi_den_band, self.config.green_band, self.config.blue_band]
-        if apply_cloud_mask:
+        stack_bands = list(requested_bands)
+        if apply_cloud_mask and self.config.qa_band not in stack_bands:
             stack_bands.append(self.config.qa_band)
+
+        items = self._filter_items_by_assets(items, set(stack_bands))
+        if not items:
+            raise NoScenesFoundError(
+                f"No scenes found for year {year} with bands {requested_bands!r} "
+                f"in the selected seasonal window for scene_id={scene_id!r}."
+            )
 
         data = stack_items(
             items,
@@ -170,22 +129,105 @@ class RasterService:
             aoi_geometry=self.config.aoi_geometry,
         )
 
-        rgb = data.sel(band=[self.config.ndvi_den_band, self.config.green_band, self.config.blue_band])
+        mask = None
         if apply_cloud_mask:
-            cloud_mask = build_landsat_cloud_mask(
+            mask = build_landsat_cloud_mask(
                 data,
                 qa_band=self.config.qa_band,
                 cloud_bits=self.config.cloud_bits,
             )
-            if cloud_mask is None or not bool(cloud_mask.any()):
+            if mask is None or not bool(mask.any()):
                 raise NoClearPixelsError(
                     f"No usable clear-sky pixels remained for year {year} after masking. "
                     "Try a higher cloud threshold or a different season."
                 )
-            rgb = rgb.where(cloud_mask)
 
-        rgb = rgb.median(dim="time")
-        return rgb.compute() if self.config.compute else rgb
+        return data, requested_bands, mask
+
+    def build_composite(
+        self,
+        year: int,
+        bands: tuple[str, ...],
+        scene_id: str | None = None,
+        apply_cloud_mask: bool = True,
+    ):
+        """Build a temporal composite from any requested imagery bands."""
+        data, requested_bands, mask = self._load_stack(
+            year,
+            bands,
+            scene_id=scene_id,
+            apply_cloud_mask=apply_cloud_mask,
+        )
+
+        return temporal_composite(
+            data,
+            bands=requested_bands,
+            mask=mask,
+            reducer=self.config.reducer,
+            compute=self.config.compute,
+        )
+
+    def build_normalized_difference(
+        self,
+        year: int,
+        numerator_band: str,
+        denominator_band: str,
+        scene_id: str | None = None,
+        apply_cloud_mask: bool = True,
+    ):
+        """Build a normalized-difference index from any two imagery bands."""
+        data, _, mask = self._load_stack(
+            year,
+            bands=(numerator_band, denominator_band),
+            scene_id=scene_id,
+            apply_cloud_mask=apply_cloud_mask,
+        )
+        index = compute_normalized_difference(
+            data,
+            num_band=numerator_band,
+            den_band=denominator_band,
+            mask=mask,
+            reducer=self.config.reducer,
+            compute=self.config.compute,
+        )
+        if index is None or index.size == 0:
+            raise NoClearPixelsError(
+                f"The normalized-difference result for year {year} contained no valid pixels."
+            )
+        return index
+
+    def build_ndvi_raster(self, year: int, scene_id: str | None = None):
+        """Build an NDVI raster using the configured numerator and denominator bands."""
+        return self.build_normalized_difference(
+            year,
+            numerator_band=self.config.ndvi_num_band,
+            denominator_band=self.config.ndvi_den_band,
+            scene_id=scene_id,
+        )
+
+    def build_nbr_raster(self, year: int, scene_id: str | None = None):
+        """Build an NBR raster using the configured numerator and denominator bands."""
+        return self.build_normalized_difference(
+            year,
+            numerator_band=self.config.nbr_num_band,
+            denominator_band=self.config.nbr_den_band,
+            scene_id=scene_id,
+        )
+
+    def build_rgb_raster(self, year: int, scene_id: str | None = None, apply_cloud_mask: bool = False):
+        """Build an RGB raster for a year or a selected scene within that year.
+
+        RGB visualization keeps cloudy pixels by default so the scene footprint remains visible. """
+        return self.build_composite(
+            year,
+            bands=(
+                self.config.red_band,
+                self.config.green_band,
+                self.config.blue_band,
+            ),
+            scene_id=scene_id,
+            apply_cloud_mask=apply_cloud_mask,
+        )
 
     def build_classified_raster(self, year: int, scene_id: str | None = None) -> ClassifiedRasterResult:
         """Get a classified raster and NDVI index for a given year or selected scene."""
