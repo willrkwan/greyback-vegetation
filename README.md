@@ -1,58 +1,59 @@
 # Greyback Lake vegetation analysis
 
-This project compares seasonal vegetation-index patterns around Greyback Lake, British Columbia. It uses Landsat Collection 2 Level-2 imagery from the Microsoft Planetary Computer STAC API and displays the results in a Streamlit application.
+This project examines seasonal vegetation indices around Greyback Lake, British Columbia. It uses Landsat Collection 2 Level-2 imagery from the Microsoft Planetary Computer STAC API and presents the results in a Streamlit app.
 
-## Implemented workflow
+## Current workflow
 
-1. Fetch the FWA assessment watershed containing the configured Greyback Lake coordinate (`49.630227703275324, -119.42400064714786`) from the British Columbia WFS service.
-2. Use the assessment watershed geometry as the area of interest (AOI). The current match is the Penticton Creek watershed (`WATERSHED_FEATURE_ID=12515`) and covers approximately 8,289 hectares.
-3. Query Landsat scenes for the AOI and a selected year and seasonal date range. The available year range is 1984 through 2025.
-4. Use the STAC `eo:cloud_cover` field to filter scenes, then retain scenes with the required Landsat assets.
-5. Stack the red, near-infrared, QA, and RGB assets on a 30 m grid in UTM Zone 11N (`EPSG:32611`), using the AOI bounds for scene discovery and masking pixels outside the watershed.
-6. Apply a Landsat `QA_PIXEL` bit mask to the red and near-infrared data, calculate NDVI, and take the temporal median across all eligible scenes in the seasonal window.
-7. Group the composite NDVI values with fixed thresholds of `-0.05`, `0.10`, `0.20`, `0.35`, and `0.50`.
-8. Compare two seasonal composites by subtracting the baseline NDVI from the comparison-year NDVI. Missing values remain `NaN` instead of being assigned to a vegetation class.
+1. Use the watershed notebook to identify the FWA assessment watershed containing the Greyback Lake coordinate (`49.630227703275324, -119.42400064714786`).
+2. Save the selected polygon as `data/aoi/greyback_assessment_aoi.geojson`. The current feature is the Penticton Creek watershed (`WATERSHED_FEATURE_ID=12515`), covering about 8,289 hectares.
+3. Read the local AOI in the app and use its bounds to search Landsat scenes for a selected year and seasonal date range. The app supports years 2013 through 2026.
+4. Filter scenes with the STAC `eo:cloud_cover` field and keep scenes that contain the bands required by the selected profile.
+5. Stack imagery on a 30 m grid in UTM Zone 11N (`EPSG:32611`). The stack uses the AOI bounds for scene discovery, then masks pixels outside the polygon.
+6. Apply the Landsat `QA_PIXEL` mask where required, calculate continuous indices or band composites, and reduce the eligible scenes across the seasonal window.
+7. Use named band profiles for NDVI, NBR, and RGB. NDVI uses `nir08` and `red`; NBR uses `nir08` and `swir22`; RGB uses `red`, `green`, and `blue`.
+8. Compare two seasonal NDVI composites by subtracting baseline values from comparison-year values. Missing pixels remain `NaN`.
 
 ## Assessment watershed AOI
 
-The AOI is retrieved from the BC Data Catalogue layer `WHSE_BASEMAPPING.FWA_ASSESSMENT_WATERSHEDS_POLY` through its WFS endpoint:
+The AOI was identified from the BC Data Catalogue layer `WHSE_BASEMAPPING.FWA_ASSESSMENT_WATERSHEDS_POLY` through this WFS endpoint:
 
 `https://openmaps.gov.bc.ca/geo/pub/WHSE_BASEMAPPING.FWA_ASSESSMENT_WATERSHEDS_POLY/ows`
 
-The lookup uses the Greyback Lake point to select one polygon. The watershed notebook exports the selected feature to `data/aoi/greyback_assessment_aoi.geojson`. The Streamlit app reads this local artifact at runtime and does not contact the WFS service.
+The watershed notebook performs the lookup and exports the selected polygon to `data/aoi/greyback_assessment_aoi.geojson`. The Streamlit app reads that local file and does not contact the WFS service.
 
-To swap the AOI, export another polygon to the same path, or change `AOI_PATH` in `src/aoi.py` to point to a different GeoJSON file. The file must contain at least one feature with a valid CRS.
+To use another AOI, export a polygon to the same path or change `AOI_PATH` in `src/aoi.py`. The file must contain at least one feature with a valid CRS.
 
-The raster stack is requested over the polygon's bounding box because STAC requires a search footprint. After stacking, `rasterio.features.geometry_mask` removes pixels outside the actual assessment watershed. The polygon is transformed from WGS84 (`EPSG:4326`) to UTM Zone 11N (`EPSG:32611`) before raster masking.
+STAC searches use the polygon's bounding box as their footprint. After stacking, `rasterio.features.geometry_mask` removes pixels outside the polygon. The app transforms the AOI from WGS84 (`EPSG:4326`) to UTM Zone 11N (`EPSG:32611`) before raster masking.
 
 ## Streamlit application
 
-In the Streamlit app, you can:
+The app provides:
 
-- Single-year classified NDVI, continuous NDVI, or RGB composite views.
-- Two-year classified comparison with a continuous NDVI change surface.
-- Two-year continuous NDVI comparison with an NDVI change surface.
-- Two-year RGB composite comparison for visual inspection.
-- Controls for analysis mode, baseline and comparison years, seasonal start month and day, season length, and scene-level cloud filtering.
-- A table of the eligible scenes used in each composite, including acquisition date, platform, cloud-cover metadata, and required-band availability.
-- Class-pixel summaries for classified outputs and NDVI-change percentiles for comparison outputs.
+- Single-year continuous NDVI and RGB composite views.
+- Two-year NDVI comparisons with an NDVI change surface.
+- Two-year RGB comparisons for visual inspection.
+- Controls for analysis mode, baseline and comparison years, seasonal start month and day, season length, and scene cloud filtering.
+- A table of eligible scenes with acquisition date, platform, cloud cover, and available bands.
+- NDVI-change percentiles for comparison outputs.
+
+NBR is available as a named profile in the raster service for notebook or future UI exploration. The app does not classify pixels into land-cover categories using arbitrary NDVI thresholds.
 
 The change map uses a red-to-green scale centered at zero. Negative values indicate lower NDVI in the comparison composite, while positive values indicate higher NDVI. RGB is provided for visual context and does not use the NDVI cloud mask by default.
 
 ## Interpretation and limitations
 
-The six output categories come from NDVI thresholds. They are not validated land-cover classes and should not be read as definitive water, built-up, shrubland, or forest labels. NDVI alone cannot reliably separate all of those surfaces.
+NDVI and NBR are continuous normalized-difference indices. They should be interpreted as spectral measurements, not definitive vegetation or land-cover labels.
 
-The year-to-year difference is an exploratory comparison. Phenology, acquisition timing, scene availability, residual contamination, sensor differences, and changes in valid-pixel coverage can all affect it. Using the same seasonal window improves comparability, but does not remove these sources of uncertainty.
+The year-to-year difference is exploratory. Phenology, acquisition timing, scene availability, residual contamination, sensor differences, and changes in valid-pixel coverage can all affect it. Using the same seasonal window improves comparability but does not remove these sources of uncertainty.
 
-The repository does not include the validation workflow from the earlier project draft. There is no cutblock/PostGIS validation routine, confusion matrix, accuracy estimate, or Random Forest classifier. These remain future extensions.
+The current AOI is an FWA assessment watershed, not a custom lake catchment. It is substantially larger than the lake, so conclusions describe the assessment watershed unless a narrower catchment is substituted.
 
-The current AOI is an FWA assessment watershed, a custom lake catchment. It is substantially larger than the lake itself, so conclusions describe the assessment watershed unless a more narrowly defined catchment is substituted.
+The repository does not include the validation workflow from the earlier project draft. There is no cutblock/PostGIS validation routine, confusion matrix, accuracy estimate, or Random Forest classifier.
 
 ## Future work
 
 - Report valid-pixel coverage, scene counts, and acquisition-date distributions for each composite.
-- Validate the NDVI categories or replace them with a supervised, multi-band land-cover classification.
+- Add more named band profiles or indices for spectral exploration.
 - Add an independent reference dataset and report a confusion matrix with class-specific accuracy measures.
-- Measure sensitivity to the seasonal window, cloud threshold, reducer, and NDVI thresholds.
+- Measure sensitivity to the seasonal window, cloud threshold, reducer, and index definitions.
 
