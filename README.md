@@ -34,7 +34,7 @@ The app provides:
 - A table of eligible scenes with acquisition date, platform, cloud cover, and available bands.
 - NDVI-change percentiles for comparison outputs.
 
-NBR is available as a named profile in the raster service for notebook or future UI exploration. The app does not classify pixels into land-cover categories using arbitrary NDVI thresholds.
+NBR is available as a named profile in the raster service for notebook or future UI exploration.
 
 The change map uses a red-to-green scale centered at zero. Negative values indicate lower NDVI in the comparison composite, while positive values indicate higher NDVI. RGB is provided for visual context and does not use the NDVI cloud mask by default.
 
