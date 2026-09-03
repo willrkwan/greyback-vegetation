@@ -1,6 +1,8 @@
 from datetime import date, timedelta
 
 import geopandas as gpd
+import xarray as xr
+from rasterio.features import geometry_mask
 from shapely.geometry import Point, box, mapping, shape
 
 import stackstac
@@ -47,10 +49,10 @@ def search_stac_items(catalog, collection_id, footprint, date_range, max_cloud=1
         datetime=date_range,
     ).item_collection()
 
-def stack_items(items, footprint, bands, resolution=10, epsg=32611):
-    """Stack STAC items into a lazy xarray DataArray."""
+def stack_items(items, footprint, bands, resolution=10, epsg=32611, aoi_geometry=None):
+    """Stack STAC item collection into a lazy xarray DataArray and mask it to an AOI."""
     footprint_geom = shape(footprint)
-    return stackstac.stack(
+    data = stackstac.stack(
         items,
         assets=list(bands),
         resolution=resolution,
@@ -58,8 +60,29 @@ def stack_items(items, footprint, bands, resolution=10, epsg=32611):
         epsg=epsg,
     )
 
+    if aoi_geometry is None:
+        return data
+
+    aoi_geometry_projected = gpd.GeoSeries(
+        [shape(aoi_geometry)], crs="EPSG:4326"
+    ).to_crs(epsg=epsg).iloc[0]
+    mask = geometry_mask(
+        [mapping(aoi_geometry_projected)],
+        out_shape=(data.sizes["y"], data.sizes["x"]),
+        transform=data.transform,
+        invert=True,
+    )
+    aoi_mask = xr.DataArray(
+        mask,
+        dims=("y", "x"),
+        coords={"y": data.y, "x": data.x},
+    )
+    return data.where(aoi_mask)
+
 def build_landsat_cloud_mask(raw_stack, qa_band="qa_pixel", cloud_bits=(1, 3, 4)):
-    """Create a boolean mask where True means clear-sky pixel."""
+    """Create a boolean mask where True means clear-sky pixel. Bands 1, 3, and 4 of the 
+    Landsat QA_PIXEL band indicate cloud, cloud shadow, and snow/ice respectively.
+    """
     qa = raw_stack.sel(band=qa_band).astype("uint16")
     bitmask = 0
     for bit in cloud_bits:

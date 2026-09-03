@@ -1,13 +1,15 @@
-def temporal_composite(raw_stack, bands, mask=None, reducer="median", dim="time"):
+def temporal_composite(raw_stack, bands, mask=None, reducer="median", dim="time", compute=True):
     """Select bands, optionally mask, and reduce by a specified reducer over time."""
     subset = raw_stack.sel(band=list(bands))
     if mask is not None:
         subset = subset.where(mask)
     if reducer == "median":
-        return subset.median(dim=dim)
-    if reducer == "mean":
-        return subset.mean(dim=dim)
-    raise ValueError(f"Unsupported reducer: {reducer}")
+        composite = subset.median(dim=dim)
+    elif reducer == "mean":
+        composite = subset.mean(dim=dim)
+    else:
+        raise ValueError(f"Unsupported reducer: {reducer}")
+    return composite.compute() if compute else composite
 
 def percentile_stretch(image, low_q=0.02, high_q=0.98, clip_range=(0, 1), compute=True):
     """Apply percentile contrast stretch for visualization."""
