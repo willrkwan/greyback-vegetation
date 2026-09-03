@@ -40,16 +40,7 @@ The change map uses a red-to-green scale centered at zero. Negative values indic
 
 ## Interpretation and limitations
 
-NDVI and NBR are continuous normalized-difference indices. They should be interpreted as spectral measurements, not definitive vegetation or land-cover labels.
-
 The year-to-year difference is exploratory. Phenology, acquisition timing, scene availability, residual contamination, sensor differences, and changes in valid-pixel coverage can all affect it. Using the same seasonal window improves comparability but does not remove these sources of uncertainty.
 
 The current AOI is an FWA assessment watershed, not a custom lake catchment. It is substantially larger than the lake, so conclusions describe the assessment watershed unless a narrower catchment is substituted.
-
-The repository does not include the validation workflow from the earlier project draft. There is no cutblock validation routine, confusion matrix, accuracy estimate, or Random Forest classifier.
-
-## Future work
-
-- Add more named band profiles or indices for spectral exploration.
-- Measure sensitivity to the seasonal window, cloud threshold, reducer, and index definitions.
 
