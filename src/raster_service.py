@@ -1,4 +1,3 @@
-from .classification import classify_by_thresholds
 from .indices import compute_normalized_difference
 from .preprocessing import temporal_composite
 from .ingest import (
@@ -8,12 +7,7 @@ from .ingest import (
     stack_items, 
     build_landsat_cloud_mask,
 )
-from .models import (
-    ClassifiedRasterResult, 
-    RasterConfig,
-    ChangeRasterResult,
-    SceneSummary,
-)
+from .models import IndexChangeResult, RasterConfig, SceneSummary
 
 
 class RasterServiceError(RuntimeError):
@@ -229,30 +223,30 @@ class RasterService:
             apply_cloud_mask=apply_cloud_mask,
         )
 
-    def build_classified_raster(self, year: int, scene_id: str | None = None) -> ClassifiedRasterResult:
-        """Get a classified raster and NDVI index for a given year or selected scene."""
-        ndvi = self.build_ndvi_raster(year, scene_id=scene_id)
-
-        classified_raster = classify_by_thresholds(
-            ndvi, 
-            thresholds=self.config.thresholds, 
-            class_values=self.config.class_values
-        )
-
-        return ClassifiedRasterResult(raster=classified_raster, ndvi=ndvi)
-
-
-    def build_change_raster(
+    def build_index_change(
         self,
         base_year: int,
         target_year: int,
+        numerator_band: str,
+        denominator_band: str,
         base_scene_id: str | None = None,
         target_scene_id: str | None = None,
-    ) -> ChangeRasterResult:
-        """Get a change raster comparing NDVI between two years, and each year's classified raster and index."""
-        base_result = self.build_classified_raster(base_year, scene_id=base_scene_id)
-        target_result = self.build_classified_raster(target_year, scene_id=target_scene_id)
-
-        ndvi_diff = target_result.ndvi - base_result.ndvi
-       
-        return ChangeRasterResult(ndvi_diff=ndvi_diff, base_classified=base_result, target_classified=target_result)
+    ) -> IndexChangeResult:
+        """Compare a normalized-difference index between two years."""
+        baseline = self.build_normalized_difference(
+            base_year,
+            numerator_band=numerator_band,
+            denominator_band=denominator_band,
+            scene_id=base_scene_id,
+        )
+        comparison = self.build_normalized_difference(
+            target_year,
+            numerator_band=numerator_band,
+            denominator_band=denominator_band,
+            scene_id=target_scene_id,
+        )
+        return IndexChangeResult(
+            ndvi_diff=comparison - baseline,
+            baseline=baseline,
+            comparison=comparison,
+        )

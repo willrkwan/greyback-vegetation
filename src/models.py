@@ -5,15 +5,10 @@ import pystac_client
 import xarray as xr
 
 @dataclass
-class ClassifiedRasterResult:
-    raster: xr.DataArray
-    ndvi: xr.DataArray
-
-@dataclass
-class ChangeRasterResult:
+class IndexChangeResult:
     ndvi_diff: xr.DataArray
-    base_classified: ClassifiedRasterResult
-    target_classified: ClassifiedRasterResult
+    baseline: xr.DataArray
+    comparison: xr.DataArray
 
 
 @dataclass(frozen=True)
@@ -65,8 +60,5 @@ class RasterConfig:
     cloud_bits: tuple[int, ...] = (1, 3, 4)
 
     reducer: str = "median"
-
-    thresholds: tuple[float, ...] = (-0.05, 0.10, 0.20, 0.35, 0.50)
-    class_values: tuple[int, ...] = (0, 1, 2, 3, 4, 5)
 
     compute: bool = True

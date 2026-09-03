@@ -103,8 +103,6 @@ def load_service(
         qa_band="qa_pixel",
         cloud_bits=(1, 3, 4),
         reducer="median",
-        thresholds=(-0.05, 0.10, 0.20, 0.35, 0.50),
-        class_values=(0, 1, 2, 3, 4, 5),
     )
     return RasterService(config)
 
